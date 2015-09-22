@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OneDrive Free Client</title>
+<style type="text/css">
+html, body {
+	font-family: "Open Sans", Arial, Helvetica, sans-serif;
+	color: #333;
+	margin: 0em;
+	background-color: #fff;
+	
+}
+h1 {
+	font-size: 4em;
+	text-align: center;
+	font-weight: normal;
+}
+h2 {
+	font-size: 2.5em;
+	text-align: center;
+	font-weight: normal;
+}
+h3 {
+	font-size: 1.5em;
+	text-align: center;
+	font-weight: normal;
+}
+a, a:visited {
+	color: #08C;
+}
+a:hover {
+	color:#333;
+}
+section {
+	margin: 4em auto 3em auto;
+}
+section:nth-child(even) {
+	background-color: #f3f3f3;
+}
+#download {
+	padding: 2em 0em 2em 0em;
+}
+#facts {
+	margin: auto;
+	padding: 1em 0em 1em 0em;
+	text-align: center;
+}
+#logo {
+	display: block;
+	width: 15em;
+	margin: 2em auto;
+}
+.content {
+	max-width: 60em;
+	margin-left: auto;
+	margin-right: auto;
+}
+.fact {
+	display: inline-block;
+	font-size: 1.5em;
+	margin: 1em;
+	padding: 0em;
+	width: 9em;
+}
+.terminal {
+	font-family: "DejaVu Sans Mono", "Lucida Console", Monaco, monospace;
+	margin: auto;
+	padding: 1em 0.5em 1em 0.5em;
+	border: thin solid #ddd;
+	border-top: thick solid #ddd;
+	width: 100%;
+}
+.terminal td {
+	padding-left: 0.5em;
+}
+</style>
+</head>
+
+<header class="content">
+<h1>OneDrive, for Linux</h1>
+<figure><img id="logo" alt="OneDrive Free Client Logo" src="images/onedrive_tux.svg"/></figure>
+</header>
+
+<section>
+<div id = "facts" class="content">
+<div class="fact">No Python<br>No Java<br>Just a binary</div>
+<div class="fact">Minimal<br>dependencies:<br>libcurl & sqlite</div>
+<div class="fact">Real-Time<br>monitoring<br>with inotify</div>
+</div>
+</section>
+
+<section>
+<h2>Easy to configure:</h2>
+<table class="terminal content">
+<tr><td>$ cat ~/.config/onedrive/config</td></tr>
+<tr><td>sync_dir = "~/OneDrive"</td></tr>
+<tr><td>skip_file = ".*|~*|thumbs.db|Games/*.iso"</td></tr>
+<tr><td>skip_dir = ".*|Music|Movies/FullHD"</td></tr>
+</table>
+<h2>So simple, You already know how to use it:</h2>
+<table class="terminal content">
+<tr><td colspan="3">$ onedrive -h</td><td>
+<tr><td colspan="3">Usage: onedrive [OPTION]...</td><td>
+<tr><td colspan="2">no option</td><td>Sync and exit.</td></tr>
+<tr><td>-m</td><td>--monitor</td><td>Keep monitoring for local and remote changes.</td><td>
+<tr><td></td><td>--resync</td><td>Forget the last saved state, perform a full sync.</td><td>
+<tr><td>-v</td><td>--verbose</td><td>Print more details, useful for debugging.</td><td>
+<tr><td>-h</td><td>--help</td><td>This help information.</td><td>
+</table>
+</section>
+
+<section>
+<div id="download">
+<h3><a href="https://github.com/skilion/onedrive">Download from GitHub</a></h3>
+</div>
+</section>
+
+<body>
+</body>
+</html>
