@@ -14,6 +14,11 @@ SOURCES = \
 	src/upload.d \
 	src/util.d
 
+all: onedrive service
+
+service:
+	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
+
 onedrive: $(SOURCES)
 	$(DC) -O -release -inline -boundscheck=off $(DFLAGS) $(SOURCES)
 
@@ -21,9 +26,9 @@ debug: $(SOURCES)
 	$(DC) -unittest -debug -g -gs $(DFLAGS) $(SOURCES)
 
 clean:
-	rm -f onedrive.o onedrive
+	rm -f onedrive.o onedrive onedrive.service
 
-install: onedrive onedrive.conf
+install: onedrive onedrive.conf service
 	install -D -m 755 onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
 	install -D -m 644 onedrive.conf $(DESTDIR)$(SYSCONFDIR)/onedrive.conf
 	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
