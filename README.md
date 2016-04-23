@@ -15,7 +15,8 @@ OneDrive Free Client
 
 * [libcurl](http://curl.haxx.se/libcurl/)
 * [SQLite 3](https://www.sqlite.org/)
-* [Digital Mars D Compiler (DMD)](http://dlang.org/download.html)
+* If your distro splits libs and development files, you will also need dev/devel packages for each at build time
+* [Digital Mars D Compiler (DMD)](http://dlang.org/download.html) at build time
 
 ### Installation
 
