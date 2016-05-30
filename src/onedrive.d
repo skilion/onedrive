@@ -183,20 +183,21 @@ final class OneDriveApi
 
 	private void redeemToken(const(char)[] authCode)
 	{
-		string postData = "client_id=" ~ clientId ~ "&redirect_uri=" ~ redirectUrl ~ "&client_secret=" ~ clientSecret;
+		string postData = "client_id=" ~ clientId ~ "&redirect_uri=" ~ redirectUrl;
 		postData ~= "&code=" ~ authCode ~ "&grant_type=authorization_code";
 		acquireToken(postData);
 	}
 
 	private void newToken()
 	{
-		string postData = "client_id=" ~ clientId ~ "&redirect_uri=" ~ redirectUrl ~ "&client_secret=" ~ clientSecret;
+		string postData = "client_id=" ~ clientId ~ "&redirect_uri=" ~ redirectUrl;
 		postData ~= "&refresh_token=" ~ refreshToken ~ "&grant_type=refresh_token";
 		acquireToken(postData);
 	}
 
 	private void acquireToken(const(char)[] postData)
 	{
+		http.addRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 		JSONValue response = post(tokenUrl, postData);
 		accessToken = "bearer " ~ response["access_token"].str();
 		refreshToken = response["refresh_token"].str();
