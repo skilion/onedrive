@@ -3,6 +3,16 @@ import std.getopt, std.file, std.path, std.process, std.stdio;
 import config, itemdb, monitor, onedrive, sync, util;
 
 
+void createSyncDir(string syncDirFullPath) {
+    if (!exists(syncDirFullPath)) {
+        mkdirRecurse(syncDirFullPath);
+    } else if (isFile(syncDirFullPath)) {
+        writeln(syncDirFullPath, " is a file, should be a directory.");
+        throw new Exception("sync_dir is a file, should be a directory.");
+    }
+}
+
+
 void main(string[] args)
 {
 	// always print log messages
@@ -71,6 +81,7 @@ void main(string[] args)
 
 	string syncDir = expandTilde(cfg.get("sync_dir"));
 	if (verbose) writeln("All operations will be performed in: ", syncDir);
+        createSyncDir(syncDir);
 	chdir(syncDir);
 
 	if (verbose) writeln("Initializing the Synchronization Engine ...");
