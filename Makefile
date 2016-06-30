@@ -1,7 +1,7 @@
 DC = dmd
 DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl
-DESTDIR = /usr/local/bin
-CONFDIR = /usr/local/etc
+PREFIX = /usr/local
+SYSCONFDIR = $(PREFIX)/etc
 
 SOURCES = \
 	src/config.d \
@@ -14,6 +14,11 @@ SOURCES = \
 	src/upload.d \
 	src/util.d
 
+all: onedrive service
+
+service:
+	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
+
 onedrive: $(SOURCES)
 	$(DC) -O -release -inline -boundscheck=off $(DFLAGS) $(SOURCES)
 
@@ -24,14 +29,14 @@ unittest: $(SOURCES)
 	$(DC) -unittest -debug -g -gs $(DFLAGS) $(SOURCES)
 
 clean:
-	rm -f onedrive.o onedrive
+	rm -f onedrive.o onedrive onedrive.service
 
-install: onedrive onedrive.conf
-	install onedrive $(DESTDIR)/onedrive
-	install -m 644 onedrive.conf $(CONFDIR)/onedrive.conf
-	install -m 644 onedrive.service /usr/lib/systemd/user
+install: onedrive onedrive.conf service
+	install -D -m 755 onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
+	install -D -m 644 onedrive.conf $(DESTDIR)$(SYSCONFDIR)/onedrive.conf
+	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
 
 uninstall:
-	rm -f $(DESTDIR)/onedrive
-	rm -f $(CONFDIR)/onedrive.conf
-	rm -f /usr/lib/systemd/user/onedrive.service
+	rm -f $(DESTDIR)$(PREFIX)/bin/onedrive
+	rm -f $(DESTDIR)$(SYSCONFDIR)/onedrive.conf
+	rm -f $(DESTDIR)/usr/lib/systemd/user/onedrive.service

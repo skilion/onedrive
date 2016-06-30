@@ -32,8 +32,9 @@ void main(string[] args)
 
 	string configDirName = expandTilde(environment.get("XDG_CONFIG_HOME", "~/.config")) ~ "/onedrive";
 	string configFile1Path = "/etc/onedrive.conf";
-	string configFile2Path = "/usr/local/etc/onedrive.conf";
+	string configFile2Path = dirName(thisExePath()) ~ "/../etc/onedrive.conf";
 	string configFile3Path = configDirName ~ "/config";
+	string configFile4Path = dirName(thisExePath()) ~ "/onedrive.conf";
 	string refreshTokenFilePath = configDirName ~ "/refresh_token";
 	string statusTokenFilePath = configDirName ~ "/status_token";
 	string databaseFilePath = configDirName ~ "/items.db";
@@ -47,7 +48,7 @@ void main(string[] args)
 	}
 
 	if (verbose) writeln("Loading config ...");
-	auto cfg = config.Config(configFile1Path, configFile2Path, configFile3Path);
+	auto cfg = config.Config(configFile1Path, configFile2Path, configFile3Path, configFile4Path);
 
 	if (verbose) writeln("Initializing the OneDrive API ...");
 	bool online = testNetwork();
