@@ -85,13 +85,65 @@ final class SyncEngine
 		}
 	}
 
-	void applyDifferences()
+	auto updateStatusToken(string path)
 	{
-		if (verbose) writeln("Applying differences ...");
+		// based on the given path, get the status token for THIS path
+		if (verbose) writeln("Updating onStatusToken by getting delta.token for path: ", path);
+
+		string newStatusToken;
+
+		try {
+			JSONValue folderDetails;
+
+			try {
+				// test if the local path exists on OneDrive
+				onedrive.getPathDetails(path);
+			} catch (OneDriveException e) {
+				if (e.code == 404) {
+					// The directory was not found - it needs to be created
+					if (verbose) writefln("The selected local directory (%s) was not found on OneDrive", path);
+					if (verbose) writeln("Creating remote directory: ", path);
+
+					// Create the remote directory
+					JSONValue item = ["name": baseName(path).idup];
+					item["folder"] = parseJSON("{}");
+					//JSONValue createFolderResult = onedrive.createByPath(path.dirName ~ "/", item);
+					onedrive.createByPath(path.dirName ~ "/", item);
+					//saveItem(createFolderResult);
+				}
+			}
+
+			// Get the folder details
+			folderDetails = onedrive.getPathDetails(path);
+
+			// Get the token for this folder
+			newStatusToken = folderDetails["@delta.token"].str;
+			
+		} catch (ErrnoException e) {
+				throw new SyncException(e.msg, e);
+		} catch (FileException e) {
+				throw new SyncException(e.msg, e);
+		} catch (OneDriveException e) {
+				throw new SyncException(e.msg, e);
+		}
+
+		return newStatusToken;
+	}
+
+	
+	
+	
+	
+	
+	
+	void applyDifferences(string path)
+	{
+		if (verbose) writeln("Checking differences from OneDrive ...");
+		if (verbose) writeln("Selected OneDrive root path: ", path);
 		try {
 			JSONValue changes;
 			do {
-				changes = onedrive.viewChangesByPath("/", statusToken);
+				changes = onedrive.viewChangesByPath(path, statusToken);
 				foreach (item; changes["value"].array) {
 					applyDifference(item);
 				}
@@ -335,7 +387,7 @@ final class SyncEngine
 	public void scanForDifferences(string path)
 	{
 		try {
-			if (verbose) writeln("Uploading differences ...");
+			if (verbose) writeln("Checking differences from local source ...");
 			Item item;
 			if (itemdb.selectByPath(path, item)) {
 				uploadDifferences(item);
@@ -460,13 +512,67 @@ final class SyncEngine
 		}
 	}
 
-	private void uploadCreateDir(const(char)[] path)
+	private void uploadCreateDir(const(string) path)
 	{
-		writeln("Creating remote directory: ", path);
-		JSONValue item = ["name": baseName(path).idup];
-		item["folder"] = parseJSON("{}");
-		auto res = onedrive.createByPath(path.dirName ~ "/", item);
-		saveItem(res);
+		if (verbose) writefln("Requested path to create: '%s'", path);
+	
+		if (path == "."){
+			// We cant create this directory, as this would essentially equal the users OneDrive root:/
+			// But as this root is not in the DB, we are being asked to add it
+			if (verbose) writefln("Fetching details for requested path rather than creating: %s (OneDrive root:/)", path);
+			// path "." now needs to be "/" and we need to query these details
+			JSONValue pathDetailsResult;
+			pathDetailsResult = onedrive.getPathDetails("/");
+			foreach (item; pathDetailsResult["value"].array) {
+				// configure the data
+				string id = item["id"].str;
+				string name = item["name"].str;
+				ItemType type;
+				type = ItemType.dir;
+				string eTag = item["eTag"].str;
+				
+				string cTag;
+				try {
+					cTag = item["cTag"].str;
+				} catch (JSONException e) {
+					// cTag is not returned if the Item is a folder
+					// https://dev.onedrive.com/resources/item.htm
+					cTag = "";
+				}
+				
+				string mtime = item["fileSystemInfo"]["lastModifiedDateTime"].str;				
+				string parentId = null;
+				string crc32 = null;
+				
+				if (name == "root"){
+					// only add to the database this way if this is the root directory
+					itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
+				}
+			}
+		} else {
+			if (verbose) writeln("Creating remote directory: ", path);
+			JSONValue item = ["name": baseName(path).idup];
+			item["folder"] = parseJSON("{}");
+			auto res = onedrive.createByPath(path.dirName ~ "/", item);
+						
+			// Before we save this new directory, is this directories parent in the database?
+			// If it is not, the saving will fail
+			string parentId = res["parentReference"]["id"].str;
+			Item parentItem;
+			if (!itemdb.selectById(parentId, parentItem)) {
+				// the parent ID was not in the database
+				// compute the parent path
+				if (verbose) writeln("Parent ID does not exist in database - need to add parent first");
+				string parentPath;
+				parentPath = dirName(path);
+				
+				// loop back to this function
+				uploadCreateDir(parentPath);
+			}
+			
+			// save item in database
+			saveItem(res);
+		}
 	}
 
 	private void uploadNewFile(string path)
