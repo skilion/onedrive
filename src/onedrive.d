@@ -39,11 +39,13 @@ final class OneDriveApi
 
 	void delegate(string) onRefreshToken; // called when a new refresh_token is received
 
-	this(Config cfg, bool verbose)
+	this(Config cfg, bool verbose, bool debugHttp)
 	{
 		this.clientId = cfg.get("client_id");
 		http = HTTP();
-		//http.verbose = verbose;
+		if (debugHttp) {
+			http.verbose = true;
+        }
 	}
 
 	bool authorize()
@@ -69,7 +71,16 @@ final class OneDriveApi
 	{
 		this.refreshToken = refreshToken;
 	}
-
+	
+	// https://dev.onedrive.com/items/view_delta.htm
+	JSONValue getPathDetails(const(string) path)
+	{
+		checkAccessTokenExpired();
+		string url = itemByPathUrl ~ encodeComponent(path) ~ ":/view.delta";
+		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,fileSystemInfo,remoteItem,parentReference";
+		return get(url);
+	}
+	
 	// https://dev.onedrive.com/items/view_delta.htm
 	JSONValue viewChangesById(const(char)[] id, const(char)[] statusToken)
 	{
@@ -81,12 +92,17 @@ final class OneDriveApi
 	}
 
 	// https://dev.onedrive.com/items/view_delta.htm
-	JSONValue viewChangesByPath(const(char)[] path, const(char)[] statusToken)
+	JSONValue viewChangesByPath(const(string) path, const(char)[] statusToken)
 	{
 		checkAccessTokenExpired();
 		string url = itemByPathUrl ~ encodeComponent(path) ~ ":/view.delta";
 		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,fileSystemInfo,remoteItem,parentReference";
-		if (statusToken) url ~= "&token=" ~ statusToken;
+		
+		// The last token returned from the previous call to view.delta. If omitted, view.delta will return the current state of the hierarchy.
+        if (path == "/"){
+			// we are checking the root path add the token
+            if (statusToken) url ~= "&token=" ~ statusToken;
+        }
 		return get(url);
 	}
 
@@ -135,6 +151,7 @@ final class OneDriveApi
 	// https://dev.onedrive.com/items/create.htm
 	JSONValue createByPath(const(char)[] parentPath, JSONValue item)
 	{
+		checkAccessTokenExpired();
 		string url = itemByPathUrl ~ encodeComponent(parentPath) ~ ":/children";
 		http.addRequestHeader("Content-Type", "application/json");
 		return post(url, item.toString());
