@@ -1,156 +1,199 @@
+import core.stdc.stdlib: EXIT_SUCCESS, EXIT_FAILURE;
 import core.memory, core.time, core.thread;
-import std.getopt, std.file, std.path, std.process, std.stdio;
+import std.getopt, std.file, std.path, std.process;
 import config, itemdb, monitor, onedrive, sync, util;
+static import log;
 
-void main(string[] args)
+int main(string[] args)
 {
-	// Definitions
-	bool debugHttp, localFirst, monitor, resync, synchronize, verbose;
-	string singleDirectory;
-	
+	// configuration directory
 	string configDirName = expandTilde(environment.get("XDG_CONFIG_HOME", "~/.config")) ~ "/onedrive";
-	string configFile1Path = "/etc/onedrive.conf";
-	string configFile2Path = "/usr/local/etc/onedrive.conf";
-	string configFile3Path = configDirName ~ "/config";
-	string refreshTokenFilePath = configDirName ~ "/refresh_token";
-	string statusTokenFilePath = configDirName ~ "/status_token";
-	string databaseFilePath = configDirName ~ "/items.db";
+	// enable monitor mode
+	bool monitor;
+	// force a full resync
+	bool resync;
+	// remove the current user and sync state
+	bool logout;
+	// enable verbose logging
+	bool verbose;
+
+	// Debug the HTTP operations if required
+	bool debugHttp;
 	
-	// Read user input
+	// Single directory sync options
+	// This allows for selective directory syncing instead of everything under ~/OneDrive/
+	string singleDirectory;
+	string createDirectory;
+	string removeDirectory;
+	string sourceDirectory;
+	string destinationDirectory;
+	
+	// Configure a flag to perform a sync
+	// This is beneficial so that just running the client itself - options, or sync check, does not perform a sync
+	bool synchronize;
+	
+	// Local sync - Upload local changes first before downloading changes from OneDrive
+	bool localFirst;
+	
 	try {
 		auto opt = getopt(
 			args,
-				"debug", "Debug OneDrive HTTP communication.", &debugHttp,
-				"directory|d", "Specify a single local directory within the OneDrive root to sync.", &singleDirectory,
-				"local-first|l", "Synchronize from the local directory source first, before downloading changes from OneDrive.", &localFirst,
-				"monitor|m", "Keep monitoring for local and remote changes.", &monitor,
-				"resync|r", "Forget the last saved state, perform a full resync from your OneDrive account.", &resync,
-				"synchronize|s", "Perform a synchronization", &synchronize,
-				"verbose|v", "Print more details, useful for debugging.", &verbose
+			std.getopt.config.bundling,
+			"confdir", "Set the directory to use to store the configuration files.", &configDirName,
+			"create-directory", "Create a directory on OneDrive - no sync will be performed.", &createDirectory,
+			"debug", "Debug OneDrive HTTP communication.", &debugHttp,
+			"destination-directory", "Destination directory for renamed or move on OneDrive - no sync will be performed.", &destinationDirectory,
+			"directory", "Specify a single local directory within the OneDrive root to sync.", &singleDirectory,
+			"local-first", "Synchronize from the local directory source first, before downloading changes from OneDrive.", &localFirst,
+			"logout", "Remove current user's OneDrive credentials.", &logout,
+			"monitor", "Keep monitoring for local and remote changes.", &monitor,
+			"resync", "Forget the last saved state, perform a full sync.", &resync,
+			"remove-directory", "Remove a directory on OneDrive - no sync will be performed.", &removeDirectory,
+			"source-directory", "Source directory to rename or move on OneDrive - no sync will be performed.", &sourceDirectory,
+			"synchronize", "Perform a synchronization", &synchronize,
+			"verbose", "Print more details, useful for debugging.", &log.verbose
 		);
 		if (opt.helpWanted) {
 			defaultGetoptPrinter(
 				"Usage: onedrive [OPTION]...\n\n" ~
-				"no option    Sync and exit.",
+				"no option    Validate configuration and exit.",
 				opt.options
 			);
-			return;
+			return EXIT_SUCCESS;
 		}
 	} catch (GetOptException e) {
-		writeln(e.msg);
-		writeln("Try 'onedrive -h' for more information.");
-		return;
+		log.log(e.msg);
+		log.log("Try 'onedrive -h' for more information.");
+		return EXIT_FAILURE;
 	}
 
-	// Load the configuration files
-	if (verbose) writeln("Loading config ...");
-	auto cfg = config.Config(configFile1Path, configFile2Path, configFile3Path);
-	string syncDir = expandTilde(cfg.get("sync_dir"));
-	
-	// Before attempting to perform any actions - are the application directories setup?
-	//              ~/.config/onedrive
-    //              ~/OneDrive
-	
+	log.vlog("Loading config ...");
+	configDirName = expandTilde(configDirName);
 	if (!exists(configDirName)) mkdir(configDirName);
-	if (!exists(syncDir)) mkdir(syncDir);
-
-	if (resync) {
-		if (verbose) writeln("Deleting the saved status ...");
-		if (exists(databaseFilePath)) remove(databaseFilePath);
-		if (exists(statusTokenFilePath)) remove(statusTokenFilePath);
+	auto cfg = new config.Config(configDirName);
+	cfg.init();
+	if (resync || logout) {
+		log.log("Deleting the saved status ...");
+		safeRemove(cfg.databaseFilePath);
+		safeRemove(cfg.statusTokenFilePath);
+		safeRemove(cfg.uploadStateFilePath);
+		if (logout) {
+			safeRemove(cfg.refreshTokenFilePath);
+		}
 	}
 
-	if (verbose) writeln("Initializing the OneDrive API ...");
+	log.vlog("Initializing the OneDrive API ...");
 	bool online = testNetwork();
 	if (!online && !monitor) {
-		writeln("No network connection");
-		return;
+		log.log("No network connection");
+		return EXIT_FAILURE;
 	}
-	auto onedrive = new OneDriveApi(cfg, verbose, debugHttp);
-	onedrive.onRefreshToken = (string refreshToken) {
-		std.file.write(refreshTokenFilePath, refreshToken);
-	};
-	try {
-		string refreshToken = readText(refreshTokenFilePath);
-		onedrive.setRefreshToken(refreshToken);
-	} catch (FileException e) {
-		if (!onedrive.authorize()) {
-			// workaround for segfault in std.net.curl.Curl.shutdown() on exit
-			onedrive.http.shutdown();
-			return;
-		}
+	auto onedrive = new OneDriveApi(cfg, debugHttp);
+	if (!onedrive.init()) {
+		log.log("Could not initialize the OneDrive API");
+		// workaround for segfault in std.net.curl.Curl.shutdown() on exit
+		onedrive.http.shutdown();
+		return EXIT_FAILURE;
 	}
 
-	// Configure singleDirectory entry
-	if (singleDirectory != ""){
-		if (verbose){
-			writeln("Single Directory Sync selected: ", singleDirectory);
-		}
-	}
-	
-	if ((synchronize) || (resync) || (monitor)) {
-		// open up the database only if we are syncing or going into a monitor state
-	
-		if (verbose) writeln("Opening the item database ...");
-		auto itemdb = new ItemDatabase(databaseFilePath);
+	// Do we need to create or remove a directory?
+	if ((createDirectory != "") || (removeDirectory != "")) {
 		
-		string operationsPath = syncDir;
-		if (singleDirectory != ""){
-			operationsPath = syncDir ~ "/" ~ singleDirectory;
-		}
-		
-		if (verbose) writeln("All operations will be performed in: ", operationsPath);
+		log.vlog("Opening the item database ...");
+		auto itemdb = new ItemDatabase(cfg.databaseFilePath);
+
+		string syncDir = expandTilde(cfg.getValue("sync_dir"));
+		log.vlog("All operations will be performed in: ", syncDir);
+		if (!exists(syncDir)) mkdir(syncDir);
 		chdir(syncDir);
 
-		if (verbose) writeln("Initializing the Synchronization Engine ...");
-		auto sync = new SyncEngine(cfg, onedrive, itemdb, configDirName, verbose);
-		sync.onStatusToken = (string statusToken) {
-			std.file.write(statusTokenFilePath, statusToken);
-		};
-		string statusToken;
-		try {
-			statusToken = readText(statusTokenFilePath);
-		} catch (FileException e) {
-			// swallow exception
+		log.vlog("Initializing the Synchronization Engine ...");
+		auto sync = new SyncEngine(cfg, onedrive, itemdb);
+		
+		if (createDirectory != "") {
+			// create a directory on OneDrive
+			sync.createDirectoryNoSync(createDirectory);
 		}
+	
+		if (removeDirectory != "") {
+			// remove a directory on OneDrive
+			sync.deleteDirectoryNoSync(removeDirectory);			
+		}
+	}
+	
+	// Are we renaming or moving a directory?
+	if ((sourceDirectory != "") && (destinationDirectory != "")) {
+		// We are renaming or moving a directory
+		
+		log.vlog("Opening the item database ...");
+		auto itemdb = new ItemDatabase(cfg.databaseFilePath);
+
+		string syncDir = expandTilde(cfg.getValue("sync_dir"));
+		log.vlog("All operations will be performed in: ", syncDir);
+		if (!exists(syncDir)) mkdir(syncDir);
+		chdir(syncDir);
+
+		log.vlog("Initializing the Synchronization Engine ...");
+		auto sync = new SyncEngine(cfg, onedrive, itemdb);
+		
+		// rename / move these folders
+		sync.renameDirectoryNoSync(sourceDirectory, destinationDirectory);
+	}
+	
+	// Are we performing a sync, resync or monitor operation?
+	if ((synchronize) || (resync) || (monitor)) {
+	
+		log.vlog("Opening the item database ...");
+		auto itemdb = new ItemDatabase(cfg.databaseFilePath);
+
+		string syncDir = expandTilde(cfg.getValue("sync_dir"));
+		log.vlog("All operations will be performed in: ", syncDir);
+		if (!exists(syncDir)) mkdir(syncDir);
+		chdir(syncDir);
+
+		log.vlog("Initializing the Synchronization Engine ...");
+		auto sync = new SyncEngine(cfg, onedrive, itemdb);
 		
 		if ((synchronize) || (resync)) {
-			if (online) performSync(sync, verbose, singleDirectory, localFirst, resync);
+			if (online) {
+				// Perform the sync
+				performSync(sync, singleDirectory, localFirst, resync);
+			}
 		}
 
 		if (monitor) {
-			if (verbose) writeln("Initializing monitor ...");
+			log.vlog("Initializing monitor ...");
 			Monitor m;
 			m.onDirCreated = delegate(string path) {
-				if (verbose) writeln("[M] Directory created: ", path);
+				log.vlog("[M] Directory created: ", path);
 				try {
 					sync.scanForDifferences(path);
 				} catch(SyncException e) {
-					writeln(e.msg);
+					log.log(e.msg);
 				}
 			};
 			m.onFileChanged = delegate(string path) {
-				if (verbose) writeln("[M] File changed: ", path);
+				log.vlog("[M] File changed: ", path);
 				try {
 					sync.scanForDifferences(path);
 				} catch(SyncException e) {
-					writeln(e.msg);
+					log.log(e.msg);
 				}
 			};
 			m.onDelete = delegate(string path) {
-				if (verbose) writeln("[M] Item deleted: ", path);
+				log.vlog("[M] Item deleted: ", path);
 				try {
 					sync.deleteByPath(path);
 				} catch(SyncException e) {
-					writeln(e.msg);
+					log.log(e.msg);
 				}
 			};
 			m.onMove = delegate(string from, string to) {
-				if (verbose) writeln("[M] Item moved: ", from, " -> ", to);
+				log.vlog("[M] Item moved: ", from, " -> ", to);
 				try {
 					sync.uploadMoveItem(from, to);
 				} catch(SyncException e) {
-					writeln(e.msg);
+					log.log(e.msg);
 				}
 			};
 			m.init(cfg, verbose);
@@ -164,7 +207,7 @@ void main(string[] args)
 					lastCheckTime = currTime;
 					online = testNetwork();
 					if (online) {
-						performSync(sync, verbose, singleDirectory, localFirst, resync);
+						performSync(sync, singleDirectory, localFirst, resync);
 						// discard all events that may have been generated by the sync
 						m.update(false);
 					}
@@ -176,13 +219,16 @@ void main(string[] args)
 		}
 
 	}
+	
 	// workaround for segfault in std.net.curl.Curl.shutdown() on exit
 	onedrive.http.shutdown();
+	return EXIT_SUCCESS;
 }
 
 // try to synchronize the folder three times
-void performSync(SyncEngine sync, bool verbose, string singleDirectory, bool localFirst, bool resync)
+void performSync(SyncEngine sync, string singleDirectory, bool localFirst, bool resync)
 {
+	// Initialize variables for this function
 	int count;
 	string remotePath = "/";
     string localPath = ".";
@@ -192,7 +238,7 @@ void performSync(SyncEngine sync, bool verbose, string singleDirectory, bool loc
 	if (singleDirectory != ""){
 		// Need two different path strings here
 		remotePath = singleDirectory;
-		localPath = "./" ~ singleDirectory;
+		localPath = singleDirectory;
 		
 		// Get the latest statusToken based on the path we are syncing
 		statusToken = sync.updateStatusToken(remotePath);
@@ -206,14 +252,14 @@ void performSync(SyncEngine sync, bool verbose, string singleDirectory, bool loc
 			if (!resync) {
 				// we are not resysncing
 				if (localFirst) {
-					if (verbose) writeln("Syncing changes from local path first before downloading changes from OneDrive");
+					log.vlog("Syncing changes from local path first before downloading changes from OneDrive ...");
 
 					// Scan local path first
 					sync.scanForDifferences(localPath);
 					sync.applyDifferences(remotePath);
 					count = -1;
 				} else {
-					if (verbose) writeln("Syncing changes from OneDrive first before uploading local changes");
+					log.vlog("Syncing changes from OneDrive first before uploading local changes ...");
 
 					// Scan OneDrive first
 					sync.applyDifferences(remotePath);
@@ -222,8 +268,8 @@ void performSync(SyncEngine sync, bool verbose, string singleDirectory, bool loc
 					}
 			} else {
 				// resync == true
-				if (verbose) writeln("Syncing changes from OneDrive first before uploading local changes");
-
+				log.vlog("Syncing changes from OneDrive first before uploading local changes ...");
+				
 				// Scan OneDrive first
 				sync.applyDifferences(remotePath);
 				sync.scanForDifferences(localPath);
@@ -231,7 +277,7 @@ void performSync(SyncEngine sync, bool verbose, string singleDirectory, bool loc
 			}
 		} catch (SyncException e) {
 			if (++count == 3) throw e;
-			else writeln(e.msg);
+			else log.log(e.msg);
 		}
 	} while (count != -1);
 }
