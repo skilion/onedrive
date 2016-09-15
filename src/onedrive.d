@@ -128,7 +128,20 @@ final class OneDriveApi
 		http.addRequestHeader("Content-Type", "application/octet-stream");
 		if (eTag) http.addRequestHeader("If-Match", eTag);
 		else url ~= "?@name.conflictBehavior=fail";
-		return upload(localPath, url);
+		
+		JSONValue uploadResponse = upload(localPath, url);
+		
+		// When also using WCCP gateway AV, there can be issues in getting a timely or correct response
+		try {
+			// test if 'id' is in response
+			string id = uploadResponse["id"].str;
+		} catch (JSONException e) {
+			// try the upload again ..
+			log.vlog("Invalid upload response - retrying upload");
+			uploadResponse = upload(localPath, url);
+		}
+		
+		return uploadResponse;
 	}
 
 	// https://dev.onedrive.com/items/update.htm
@@ -150,7 +163,20 @@ final class OneDriveApi
 		string url = itemByPathUrl ~ encodeComponent(path);
 		if (eTag) http.addRequestHeader("If-Match", eTag);   
 		http.addRequestHeader("Content-Type", "application/json");
-		return patch(url, data.toString());
+		
+		JSONValue updateResponse = patch(url, data.toString());
+		
+		// When also using WCCP gateway AV, there can be issues in getting a timely or correct response
+		try {
+			// test if 'id' is in response
+			string id = updateResponse["id"].str;
+		} catch (JSONException e) {
+			// try the update again ..
+			log.vlog("Invalid update response - retrying update");
+			updateResponse = patch(url, data.toString());
+		}
+		
+		return updateResponse;
 	}
 
 	// https://dev.onedrive.com/items/delete.htm
@@ -387,7 +413,7 @@ final class OneDriveApi
 		}
 		//return content.parseJSON(); - Original
 		
-		//log.vlog("OneDrive Content:", content);
+		//log.vlog("OneDrive Response Content:", content);
 		
 		// What if the content returned is not able to be parsed?
 		// Issue appears to stem from having gateway AV scanning via WCCP
@@ -395,8 +421,10 @@ final class OneDriveApi
 		try {
 			content.parseJSON();
 		} catch (JSONException e) {
-			// return blank JSON content - handle blank content elsewhere
-			return parseJSON("{}");
+			// return invalid JSON content - handle invalid content elsewhere
+			string invalidJSONString = "{ \"invalid\": \"invalid\" }";
+			JSONValue invalidJSON = parseJSON(invalidJSONString);
+			return invalidJSON;
 		}
 		return content.parseJSON();
 	}
@@ -454,6 +482,7 @@ final class OneDriveApi
 		  
 		  case 200,201,202,204:
 			// No actions
+			//log.vlog("OneDrive Response: '", http.statusLine.code, " - ", http.statusLine.reason, "'");
 			break;
 		
 		// 400 - Bad Request
@@ -473,6 +502,12 @@ final class OneDriveApi
 			// A precondition provided in the request (such as an if-match header) does not match the resource's current state.
 			log.vlog("OneDrive returned a 'HTTP 412 - Precondition Failed' - gracefully handling error");
 			break;	
+		
+		//  415 - Unsupported Media Type
+		  case 415:
+			// Unsupported Media Type ... sometimes triggered on image files, especially PNG
+			log.vlog("OneDrive returned a 'HTTP 415 - Unsupported Media Type' - gracefully handling error");
+			break;
 		
 		//  500 - Internal Server Error
 		// 	502 - Bad Gateway

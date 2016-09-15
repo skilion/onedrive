@@ -726,8 +726,10 @@ final class SyncEngine
 	
 	private void uploadNewFile(string path)
 	{
+		
+		//log.vlog("uploadNewFile called");
+		
 		// To avoid a 409 Conflict error - does the file actually exist on OneDrive already?
-	
 		JSONValue response;
 		
 		try {
@@ -737,10 +739,13 @@ final class SyncEngine
 			if (e.code == 404) {
 				// The file was not found 
 				log.log("Uploading new file: ", path);
+				
+				JSONValue responseNewFile;
+				
 				if (getSize(path) <= thresholdFileSize) {
-					response = onedrive.simpleUpload(path, path);
+					responseNewFile = onedrive.simpleUpload(path, path);
 				} else {
-					response = session.upload(path, path);
+					responseNewFile = session.upload(path, path);
 				}
 				
 				// Do we have a valid response?
@@ -749,21 +754,61 @@ final class SyncEngine
 				//
 				//		When also using WCCP gateway AV, the response can also get 'corrupted' or 'invalidated' so if a blank JSON is returned, nothing can be added to the DB, so we handle this gracefully
 				
-				if("id" in response) {
-					string id = response["id"].str;
-					string cTag = response["cTag"].str;
-					string eTag = response["eTag"].str;
+				if("id" in responseNewFile) {
+					string id = responseNewFile["id"].str;
+					string name = responseNewFile["name"].str;
 					
-					SysTime mtime = timeLastModified(path).toUTC();
+					ItemType type;
+					if (isItemFile(responseNewFile)) {
+						type = ItemType.file;
+					} else if (isItemFolder(responseNewFile)) {
+						type = ItemType.dir;
+					} else {
+						assert(0);
+					}
+					
+					string eTag = responseNewFile["eTag"].str;
+					
+					string cTag;
+					try {
+						cTag = responseNewFile["cTag"].str;
+					} catch (JSONException e) {
+						// cTag is not returned if the Item is a folder
+						// https://dev.onedrive.com/resources/item.htm
+						cTag = "";
+					}
+					
+					string mtime = responseNewFile["fileSystemInfo"]["lastModifiedDateTime"].str;
+					
+					string crc32;
+					if (type == ItemType.file) {
+						try {
+							crc32 = responseNewFile["file"]["hashes"]["crc32Hash"].str;
+						} catch (JSONException e) {
+							// swallow exception
+						}
+					}
 					
 					// Save item to database
-					saveItem(response);
+					if (name == "root"){
+						log.log("Updating Local DB to add entry for: OneDrive root");
+						string parentId = null;
+						itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
+					} else {
+						log.log("Updating Local DB to add entry for: ", path);
+						string parentId = responseNewFile["parentReference"]["id"].str;
+						itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
+						
+						//	* use the cTag instead of the eTag because Onedrive changes the
+						//	* metadata of some type of files (ex. images) AFTER they have been
+						//	* uploaded 
 					
-					//	* use the cTag instead of the eTag because Onedrive changes the
-					//	* metadata of some type of files (ex. images) AFTER they have been
-					//	* uploaded 
+						SysTime mtimeUTC = timeLastModified(path).toUTC();
+						uploadLastModifiedTimeByPath(path, cTag, mtimeUTC);
+					}
 					
-					uploadLastModifiedTimeByPath(path, cTag, mtime);
+					//saveItem(responseNewFile);
+					
 					return;
 				} else {
 					// Do nothing
@@ -782,8 +827,16 @@ final class SyncEngine
 				// configure the data
 				string id = item["id"].str;
 				string name = item["name"].str;
+				
 				ItemType type;
-				type = ItemType.dir;
+				if (isItemFile(item)) {
+					type = ItemType.file;
+				} else if (isItemFolder(item)) {
+					type = ItemType.dir;
+				} else {
+					assert(0);
+				}
+
 				string eTag = item["eTag"].str;
 				
 				string cTag;
@@ -796,7 +849,15 @@ final class SyncEngine
 				}
 				
 				string mtime = item["fileSystemInfo"]["lastModifiedDateTime"].str;
-				string crc32 = null;
+				
+				string crc32;
+				if (type == ItemType.file) {
+					try {
+						crc32 = item["file"]["hashes"]["crc32Hash"].str;
+					} catch (JSONException e) {
+						// swallow exception
+					}
+				}
 				
 				if (name == "root"){
 					log.log("Updating Local DB to add entry for: OneDrive root");
@@ -829,6 +890,9 @@ final class SyncEngine
 
 	private void uploadLastModifiedTime(const(char)[] id, const(char)[] eTag, SysTime mtime)
 	{
+	
+		//log.vlog("uploadLastModifiedTime called");
+	
 		JSONValue mtimeJson = [
 			"fileSystemInfo": JSONValue([
 				"lastModifiedDateTime": mtime.toISOExtString()
@@ -840,6 +904,9 @@ final class SyncEngine
 	
 	private void uploadLastModifiedTimeByPath(const(char)[] path, const(char)[] eTag, SysTime mtime)
 	{
+	
+		//log.vlog("uploadLastModifiedTimeByPath called");
+
 		JSONValue mtimeJson = [
 			"fileSystemInfo": JSONValue([
 				"lastModifiedDateTime": mtime.toISOExtString()
@@ -851,6 +918,9 @@ final class SyncEngine
 
 	private void saveItem(JSONValue item)
 	{
+		
+		//log.vlog("saveItem called");
+		
 		// Do we have a valid response?
 		// 		Image files (notably gif and png) 'sometimes' generate a '412 - Precondition Failed' randomly for no valid reason
 		//		This means that 'id' is not in the response
