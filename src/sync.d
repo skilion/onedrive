@@ -1,6 +1,6 @@
 import std.exception: ErrnoException;
 import std.algorithm, std.datetime, std.file, std.json, std.path, std.regex;
-import std.stdio, std.string;
+import std.stdio, std.string, std.uni, std.uri;
 import config, itemdb, onedrive, upload, util;
 static import log;
 
@@ -633,29 +633,40 @@ final class SyncEngine
 
 	private void uploadNewItems(string path)
 	{
-		if (isSymlink(path) && !exists(readLink(path))) {
-			// Ignore symbolic links
-			return;
-		}
-	
-		if (isDir(path)) {
-			if (path.matchFirst(skipDir).empty) {
-				Item item;
-				if (!itemdb.selectByPath(path, item)) {
-					uploadCreateDir(path);
+		//	https://github.com/OneDrive/onedrive-api-docs/issues/443
+		//  If the path is greater than 430 characters, then one drive will return a '400 - Bad Request' 
+		//  Need to ensure that the URI is encoded before the check is made
+		
+		if(encodeComponent(path).length < 430){
+			// path is less than 430 characters
+
+			if (isSymlink(path) && !exists(readLink(path))) {
+				// Ignore symbolic links
+				return;
+			}
+		
+			if (isDir(path)) {
+				if (path.matchFirst(skipDir).empty) {
+					Item item;
+					if (!itemdb.selectByPath(path, item)) {
+						uploadCreateDir(path);
+					}
+					auto entries = dirEntries(path, SpanMode.shallow, false);
+					foreach (DirEntry entry; entries) {
+						uploadNewItems(entry.name);
+					}
 				}
-				auto entries = dirEntries(path, SpanMode.shallow, false);
-				foreach (DirEntry entry; entries) {
-					uploadNewItems(entry.name);
+			} else {
+				if (path.matchFirst(skipFile).empty) {
+					Item item;
+					if (!itemdb.selectByPath(path, item)) {
+						uploadNewFile(path);
+					}
 				}
 			}
 		} else {
-			if (path.matchFirst(skipFile).empty) {
-				Item item;
-				if (!itemdb.selectByPath(path, item)) {
-					uploadNewFile(path);
-				}
-			}
+			// This path was skipped - why?
+			log.log("Skipping item '", path, "' due to the full path exceeding 430 characters (Microsoft OneDrive limitation)");
 		}
 	}
 

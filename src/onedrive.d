@@ -84,7 +84,21 @@ final class OneDriveApi
 		checkAccessTokenExpired();
 		string url = itemByPathUrl ~ encodeComponent(path) ~ ":/view.delta";
 		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,fileSystemInfo,remoteItem,parentReference";
-		return get(url);
+		//return get(url);
+		
+		auto getResponse = get(url);
+		// When also using WCCP gateway AV, there can be issues in getting a timely or correct response
+		// Needs to return a valid JSON array 'value' that contains the selected items
+		try {
+			// test if 'value' is in response
+			auto item = getResponse["value"].array;
+		} catch (JSONException e) {
+			// try the get again ..
+			log.vlog("Invalid get response - retrying query");
+			getResponse = get(url);
+		}
+		
+		return getResponse;
 	}
 	
 	// https://dev.onedrive.com/items/view_delta.htm
@@ -104,7 +118,6 @@ final class OneDriveApi
 		string url = itemByPathUrl ~ encodeComponent(path) ~ ":/view.delta";
 		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,fileSystemInfo,remoteItem,parentReference";
 		if (statusToken) url ~= "&token=" ~ statusToken;
-		
 		return get(url);
 	}
 
