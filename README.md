@@ -13,7 +13,7 @@ OneDrive Free Client
 
 ### Dependencies
 * [libcurl](http://curl.haxx.se/libcurl/)
-* [SQLite 3](https://www.sqlite.org/)
+* [SQLite 3](https://www.sqlite.org/) > 3.7.15
 * [Digital Mars D Compiler (DMD)](http://dlang.org/download.html)
 
 ### Dependencies: Ubuntu
@@ -23,6 +23,13 @@ sudo apt-get install libsqlite3-dev
 sudo wget http://master.dl.sourceforge.net/project/d-apt/files/d-apt.list -O /etc/apt/sources.list.d/d-apt.list
 wget -qO - http://dlang.org/d-keyring.gpg | sudo apt-key add -
 sudo apt-get update && sudo apt-get install dmd-bin
+```
+
+### Dependencies: CentOS
+Use the dmd spec file and build the Digital Mars D Compiler package. Utilise mock to rebuild the src.rpm for your environment, or use the src.rpm
+
+```
+sudo yum install sqlite-devel libcurl-devel
 ```
 
 ### Installation
