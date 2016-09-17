@@ -93,24 +93,47 @@ no option    Validate configuration and exit.
 ```
 
 ### Command Examples:
-```
+
 Sync your local onedrive home dir (~/OneDrive) and all sub directories (sync first from OneDrive -> Local)
-
-onedrive --synchronize
-
-Sync your local onedrive home dir (~/OneDrive) and all sub directories, resyncing (cleaning up any local DB cache issues, sync first from OneDrive -> Local)
-
-onedrive --resync
-
-Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from OneDrive -> Local)
-
-onedrive --synchronize --directory foldertosync
-
-Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from Local -> OneDrive)
-
-onedrive --synchronize --directory foldertosync --local-first
-
 ```
+onedrive --synchronize
+```
+Sync your local onedrive home dir (~/OneDrive) and all sub directories, resyncing (cleaning up any local DB cache issues, sync first from OneDrive -> Local)
+```
+onedrive --resync
+```
+Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from OneDrive -> Local)
+```
+onedrive --synchronize --directory foldertosync
+```
+Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from Local -> OneDrive)
+```
+onedrive --synchronize --directory foldertosync --local-first
+```
+
+Create a directory on Microsoft OneDrive (no sync is performed)
+```
+onedrive --create-directory newfolder             (create a parent)
+onedrive --create-directory newfolder/1           (create a child in parent)
+onedrive --create-directory totallynewtree/2      (create parent and child if parent does not exist)
+```
+
+Remove a directory on Microsoft OneDrive (no sync is performed)
+```
+onedrive --remove-directory newfolder             (remove parent and any children)
+onedrive --create-directory newfolder/1           (remove child from parent)
+```
+
+Rename a directory on Microsoft OneDrive (no sync is performed)
+```
+onedrive --source-directory newfolder --destination-directory renamed
+```
+
+Move a directory on Microsoft OneDrive (no sync is performed)
+```
+onedrive --source-directory sourcefolder --destination-directory newlocation/sourcefolder     (if parent does not exist will be created)
+```
+
 
 ### Notes:
 * After changing the filters (`skip_file` or `skip_dir` in your configs) you must execute `onedrive --resync`
