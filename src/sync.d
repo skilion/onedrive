@@ -221,7 +221,7 @@ final class SyncEngine
 	{
 		// This function should only be called if the path is not in the local database
 		
-		if (path == "."){
+		if ((path == ".") || (path == "/")){
 			// We cant create this directory, as this would essentially equal the users OneDrive root:/
 			// But as this root is not in the DB, we are being asked to add it
 			
@@ -769,15 +769,9 @@ final class SyncEngine
 					string id = responseNewFile["id"].str;
 					string name = responseNewFile["name"].str;
 					
+					// Explicitly set type to file
 					ItemType type;
-					if (isItemFile(responseNewFile)) {
-						type = ItemType.file;
-					} else if (isItemFolder(responseNewFile)) {
-						type = ItemType.dir;
-					} else {
-						assert(0);
-					}
-					
+					type = ItemType.file;
 					string eTag = responseNewFile["eTag"].str;
 					
 					string cTag;
@@ -803,6 +797,7 @@ final class SyncEngine
 					// Save item to database
 					if (name == "root"){
 						log.log("Updating Local DB to add entry for: OneDrive root");
+						type = ItemType.dir;
 						string parentId = null;
 						itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
 					} else {
@@ -839,14 +834,9 @@ final class SyncEngine
 				string id = item["id"].str;
 				string name = item["name"].str;
 				
+				// Explicitly set type to file
 				ItemType type;
-				if (isItemFile(item)) {
-					type = ItemType.file;
-				} else if (isItemFolder(item)) {
-					type = ItemType.dir;
-				} else {
-					assert(0);
-				}
+				type = ItemType.file;
 
 				string eTag = item["eTag"].str;
 				
@@ -872,6 +862,7 @@ final class SyncEngine
 				
 				if (name == "root"){
 					log.log("Updating Local DB to add entry for: OneDrive root");
+					type = ItemType.dir;
 					string parentId = null;
 					itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
 				} else {
