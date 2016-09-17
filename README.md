@@ -66,13 +66,43 @@ journalctl --user-unit onedrive -f
 
 ### Usage:
 ```
-onedrive [OPTION]...
+Usage: onedrive [OPTION]...
 
-no option    Sync and exit.
--m --monitor Keep monitoring for local and remote changes.
-	--resync Forget the last saved state, perform a full sync.
--v --verbose Print more details, useful for debugging.
--h    --help This help information.
+no option    Validate configuration and exit.
+                 --confdir Set the directory to use to store the configuration files.
+        --create-directory Create a directory on OneDrive - no sync will be performed.
+                   --debug Debug OneDrive HTTP communication.
+   --destination-directory Destination directory for renamed or move on OneDrive - no sync will be performed.
+               --directory Specify a single local directory within the OneDrive root to sync.
+             --local-first Synchronize from the local directory source first, before downloading changes from OneDrive.
+                  --logout Remove current user's OneDrive credentials.
+                 --monitor Keep monitoring for local and remote changes.
+                  --resync Forget the last saved state, perform a full sync.
+        --remove-directory Remove a directory on OneDrive - no sync will be performed.
+        --source-directory Source directory to rename or move on OneDrive - no sync will be performed.
+             --synchronize Perform a synchronization
+                 --verbose Print more details, useful for debugging.
+-h                  --help This help information.
+```
+
+### Command Examples:
+```
+Sync your local onedrive home dir (~/OneDrive) and all sub directories (sync first from OneDrive -> Local)
+
+onedrive --synchronize
+
+Sync your local onedrive home dir (~/OneDrive) and all sub directories, resyncing (cleaning up any local DB cache issues, sync first from OneDrive -> Local)
+
+onedrive --resync
+
+Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from OneDrive -> Local)
+
+onedrive --synchronize --directory foldertosync
+
+Sync a specific local folder within your local onedrive home dir only (~/OneDrive/foldertosync) (sync first from Local -> OneDrive)
+
+onedrive --synchronize --directory foldertosync --local-first
+
 ```
 
 ### Notes:
