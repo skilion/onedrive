@@ -355,6 +355,10 @@ final class SyncEngine
 	{
 		log.vlog(item.id, " ", item.name);
 		string path = itemdb.computePath(item.id);
+		if (!isValidName(path)) {
+			log.log("The item: ", path, " is invalid name. It's not uploaded.");
+			return;
+		}
 		final switch (item.type) {
 		case ItemType.dir:
 			if (!path.matchFirst(skipDir).empty) {
@@ -440,6 +444,10 @@ final class SyncEngine
 	private void uploadNewItems(string path)
 	{
 		if (isSymlink(path) && !exists(readLink(path))) {
+			return;
+		}
+		if (!isValidName(path)) {
+			log.log("The item: ", path, " is invalid name. It's not uploaded.");
 			return;
 		}
 		if (isDir(path)) {
