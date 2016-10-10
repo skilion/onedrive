@@ -20,14 +20,20 @@ OneDrive Free Client
 ```
 sudo apt-get install libcurl-dev
 sudo apt-get install libsqlite3-dev
+sudo apt-get install git-core
 sudo wget http://master.dl.sourceforge.net/project/d-apt/files/d-apt.list -O /etc/apt/sources.list.d/d-apt.list
 wget -qO - http://dlang.org/d-keyring.gpg | sudo apt-key add -
 sudo apt-get update && sudo apt-get install dmd-bin
 ```
 
+### Fetching source
+`git clone https://github.com/skilion/onedrive.git`
+or download [a snapshot](https://github.com/skilion/onedrive/archive/master.zip) and unpack it.
+
 ### Installation
-1. `make`
-2. `sudo make install`
+1. `cd onedrive` 
+2. `make`
+3. `sudo make install`
 
 ### Configuration:
 You should copy the default config file into your home directory before making changes:
