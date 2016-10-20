@@ -1,4 +1,5 @@
 import std.file, std.regex, std.stdio;
+import std.path, std.process;
 static import log;
 
 final class Config
@@ -24,10 +25,20 @@ final class Config
 	void init()
 	{
 		bool found = false;
-		found |= load("/etc/onedrive.conf");
-		found |= load("/usr/local/etc/onedrive.conf");
 		found |= load(userConfigFilePath);
-		if (!found) throw new Exception("No config file found");
+		found |= load("/usr/local/etc/onedrive.conf");
+		found |= load("/etc/onedrive.conf");
+		if (!found) {
+			string userConfigDirName = expandTilde(environment.get("XDG_CONFIG_HOME", "~/.config")) ~ "/onedrive";
+			mkdirRecurse(userConfigDirName);
+			auto f = File(userConfigFilePath,"w");
+			f.writeln("client_id = \"000000004C15842F\"");
+			f.writeln("sync_dir = \"~/OneDrive\"");
+			f.writeln("skip_file = \".*|~*\"");
+			f.writeln("skip_dir = \".*\"");
+		}
+		found |= load(userConfigFilePath);
+		if (!found) throw new Exception("No config file found and user config can not be created");
 	}
 
 	string getValue(string key)
