@@ -57,6 +57,7 @@ final class SyncEngine
 	private string[] skippedItems;
 	// list of items to delete after the changes has been downloaded
 	private string[] pathsToDelete;
+ 	private string[] idsToDelete;
 
 	this(Config cfg, OneDriveApi onedrive, ItemDatabase itemdb)
 	{
@@ -155,7 +156,7 @@ final class SyncEngine
 		if (isItemDeleted(item)) {
 			log.vlog("The item is marked for deletion");
 			if (cached) {
-				itemdb.deleteById(id);
+				idsToDelete ~= id;
 				pathsToDelete ~= oldPath;
 			}
 			return;
@@ -312,23 +313,30 @@ final class SyncEngine
 	private void deleteItems()
 	{
 		log.vlog("Deleting files ...");
-		foreach_reverse (path; pathsToDelete) {
+		int i = pathsToDelete.length - 1; 
+		do {
+			string path = pathsToDelete[i];
+			string id = idsToDelete[i];
 			if (exists(path)) {
 				if (isFile(path)) {
 					remove(path);
+					itemdb.deleteById(id);
 					log.log("Deleted file: ", path);
 				} else {
 					try {
 						rmdir(path);
+						itemdb.deleteById(id);
 						log.log("Deleted directory: ", path);
 					} catch (FileException e) {
 						// directory not empty
 					}
 				}
 			}
-		}
+		} while (i-->0);
 		pathsToDelete.length = 0;
 		assumeSafeAppend(pathsToDelete);
+		idsToDelete.length = 0;
+		assumeSafeAppend(idsToDelete);
 	}
 
 	// scan the given directory for differences
