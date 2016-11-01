@@ -313,7 +313,7 @@ final class SyncEngine
 	private void deleteItems()
 	{
 		log.vlog("Deleting files ...");
-		int i = pathsToDelete.length - 1; 
+		uint i = cast(uint) pathsToDelete.length - 1; 
 		do {
 			string path = pathsToDelete[i];
 			string id = idsToDelete[i];
