@@ -1,5 +1,10 @@
+GDCARM = yes
 DC = dmd
 DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl
+GDC = gdc
+GDCFLAGS = -o onedrive
+GDCLIBFLAGS = -lcurl -lsqlite3 -ldl
+
 DESTDIR = /usr/local/bin
 CONFDIR = /usr/local/etc
 
@@ -15,8 +20,22 @@ SOURCES = \
 	src/upload.d \
 	src/util.d
 
+GDCPATCHES = \
+	patch/etc_c_curl.d \
+	patch/std_net_curl.d
+
+ifeq ($(GDCARM),yes)
+	UNAME_P  = $(shell uname -p)
+else
+	UNAME_P = any
+endif
+
 onedrive: $(SOURCES)
+ifneq ($(filter arm%,$(UNAME_P)),)
+	$(GDC) -frelease -fno-bounds-check $(GDCFLAGS) $(SOURCES) $(GDCPATCHES) $(GDCLIBFLAGS)
+else
 	$(DC) -O -release -inline -boundscheck=off $(DFLAGS) $(SOURCES)
+endif
 
 debug: $(SOURCES)
 	$(DC) -debug -g -gs $(DFLAGS) $(SOURCES)

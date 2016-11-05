@@ -18,11 +18,18 @@ class OneDriveException: Exception
 	// HTTP status code
 	int code;
 
+version(GNU) {
+    @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
+    {
+        super(msg, file, line, next);
+    }
+}
+else {
     @nogc @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
     {
         super(msg, file, line, next);
     }
-
+}
 	@safe pure this(int code, string reason, string file = __FILE__, size_t line = __LINE__)
 	{
 		this.code = code;
