@@ -6,6 +6,7 @@ import std.regex;
 import std.socket;
 import std.stdio;
 import std.string;
+import std.net.curl;
 
 private string deviceName;
 
@@ -82,9 +83,12 @@ Regex!char wild2regex(const(char)[] pattern)
 bool testNetwork()
 {
 	try {
-		auto addr = new InternetAddress("login.live.com", 443);
-		auto socket = new TcpSocket(addr);
-		return socket.isAlive();
+	        HTTP http = HTTP();
+		http.onReceive = (ubyte[] data) { return data.length; };
+	        http.method = HTTP.Method.get;
+	        http.url = "https://login.live.com";
+		http.perform();
+		return true;
 	} catch (SocketException) {
 		return false;
 	}
