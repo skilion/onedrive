@@ -32,7 +32,7 @@ clean:
 install: onedrive onedrive.conf
 	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
 	install -D -m 644 onedrive.conf $(DESTDIR)$(CONFDIR)/onedrive.conf
-	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib$(LIBSUFFIX)/systemd/user
+	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib$(LIBSUFFIX)/systemd/user/onedrive.service
 
 uninstall:
 	rm -f $(DESTDIR)/$(PREFIX)/bin/onedrive
