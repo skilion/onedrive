@@ -33,14 +33,29 @@ private bool testCrc32(string path, const(char)[] crc32)
 
 class SyncException: Exception
 {
-    @nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable next = null)
+    version(GNU)
     {
-        super(msg, file, line, next);
-    }
+        @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable next = null)
+        {
+            super(msg, file, line, next);
+        }
 
-    @nogc @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
+        @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
+        {
+            super(msg, file, line, next);
+        }
+    }
+    else
     {
-        super(msg, file, line, next);
+        @nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable next = null)
+        {
+            super(msg, file, line, next);
+        }
+
+        @nogc @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
+        {
+            super(msg, file, line, next);
+        }
     }
 }
 
@@ -57,6 +72,7 @@ final class SyncEngine
 	private string[] skippedItems;
 	// list of items to delete after the changes has been downloaded
 	private string[] pathsToDelete;
+ 	private string[] idsToDelete;
 
 	this(Config cfg, OneDriveApi onedrive, ItemDatabase itemdb)
 	{
@@ -155,7 +171,7 @@ final class SyncEngine
 		if (isItemDeleted(item)) {
 			log.vlog("The item is marked for deletion");
 			if (cached) {
-				itemdb.deleteById(id);
+				idsToDelete ~= id;
 				pathsToDelete ~= oldPath;
 			}
 			return;
@@ -312,23 +328,30 @@ final class SyncEngine
 	private void deleteItems()
 	{
 		log.vlog("Deleting files ...");
-		foreach_reverse (path; pathsToDelete) {
+		uint i = cast(uint) pathsToDelete.length - 1; 
+		do {
+			string path = pathsToDelete[i];
+			string id = idsToDelete[i];
 			if (exists(path)) {
 				if (isFile(path)) {
 					remove(path);
+					itemdb.deleteById(id);
 					log.log("Deleted file: ", path);
 				} else {
 					try {
 						rmdir(path);
+						itemdb.deleteById(id);
 						log.log("Deleted directory: ", path);
 					} catch (FileException e) {
 						// directory not empty
 					}
 				}
 			}
-		}
+		} while (i-->0);
 		pathsToDelete.length = 0;
 		assumeSafeAppend(pathsToDelete);
+		idsToDelete.length = 0;
+		assumeSafeAppend(idsToDelete);
 	}
 
 	// scan the given directory for differences
