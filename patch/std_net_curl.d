@@ -1848,7 +1848,7 @@ private mixin template Protocol()
     /**
        The curl handle used by this connection.
     */
-    @property ref Curl handle() return
+    @property ref Curl handle()
     {
         return p.curl;
     }

@@ -25,7 +25,7 @@ GDCPATCHES = \
 	patch/std_net_curl.d
 
 ifeq ($(GDCARM),yes)
-	UNAME_P  = $(shell uname -p)
+	UNAME_P  = $(shell uname -p -m)
 else
 	UNAME_P = any
 endif
