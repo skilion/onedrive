@@ -41,8 +41,14 @@ struct Monitor
 	void init(Config cfg, bool verbose)
 	{
 		this.verbose = verbose;
-		skipDir = wild2regex(cfg.getValue("skip_dir"));
-		skipFile = wild2regex(cfg.getValue("skip_file"));
+                // Check if we should parse the regex or not
+                if (cfg.getValue("use_regex") == "true") {
+                        skipDir = regex(cfg.getValue("skip_dir"));
+                        skipFile = regex(cfg.getValue("skip_file"));
+                } else {
+                        skipDir = wild2regex(cfg.getValue("skip_dir"));
+                        skipFile = wild2regex(cfg.getValue("skip_file"));
+                }
 		fd = inotify_init();
 		if (fd == -1) throw new MonitorException("inotify_init failed");
 		if (!buffer) buffer = new void[4096];

@@ -41,6 +41,7 @@ Available options:
 * `sync_dir`: directory where the files will be synced
 * `skip_file`: any files that match this pattern will be skipped during sync
 * `skip_dir`: any directories that match this pattern will be skipped during sync
+* `use_regex`: use regex for `skip_dir` and `skip_file` options, default `false`
 
 Pattern are case insensitive.
 `*` and `?` [wildcards characters][3] are supported.

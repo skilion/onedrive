@@ -64,8 +64,14 @@ final class SyncEngine
 		this.cfg = cfg;
 		this.onedrive = onedrive;
 		this.itemdb = itemdb;
-		skipDir = wild2regex(cfg.getValue("skip_dir"));
-		skipFile = wild2regex(cfg.getValue("skip_file"));
+                // Check if we should parse the regex or not
+                if (cfg.getValue("use_regex") == "true") {
+                        skipDir = regex(cfg.getValue("skip_dir"));
+                        skipFile = regex(cfg.getValue("skip_file"));
+                } else {
+                        skipDir = wild2regex(cfg.getValue("skip_dir"));
+                        skipFile = wild2regex(cfg.getValue("skip_file"));
+                }
 		session = UploadSession(onedrive, cfg.uploadStateFilePath);
 	}
 
