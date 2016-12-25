@@ -25,9 +25,14 @@ wget -qO - http://dlang.org/d-keyring.gpg | sudo apt-key add -
 sudo apt-get update && sudo apt-get install dmd-bin
 ```
 
+### Fetching source
+`git clone https://github.com/skilion/onedrive.git`
+or download [a snapshot](https://github.com/skilion/onedrive/archive/master.zip) and unpack it.
+
 ### Installation
-1. `make`
-2. `sudo make install`
+1. `cd onedrive` 
+2. `make`
+3. `sudo make install`
 
 ### Configuration:
 You should copy the default config file into your home directory before making changes:
