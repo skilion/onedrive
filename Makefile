@@ -52,7 +52,7 @@ unittest: $(SOURCES)
 	$(DC) -unittest -debug -g -gs $(DFLAGS) $(SOURCES)
 
 
-.PHONY: install uninstallq
+.PHONY: install uninstall
 install: bin/onedrive config/onedrive.conf
 	install bin/onedrive $(DESTDIR)/onedrive
 	-install -m 644 services/$(SERVICE) $(SERVDIR)/$(SERVNAME)
