@@ -3,6 +3,19 @@ DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl
 DESTDIR = /usr/local/bin
 CONFDIR = /usr/local/etc
 
+ifneq (, $(shell which systemd))
+SERVICE = systemd.service
+SERVDIR = /usr/lib/systemd/user
+SERVNAME = onedrive.service
+
+else ifneq (, $(shell which initctl))
+SERVICE = upstart.conf
+SERVDIR = /etc/init
+SERVNAME = onedrive.conf
+SERVINIT = initctl reload-configuration
+
+endif
+
 SOURCES = \
 	src/config.d \
 	src/itemdb.d \
@@ -29,10 +42,13 @@ clean:
 
 install: onedrive onedrive.conf
 	install onedrive $(DESTDIR)/onedrive
+	-install -m 644 services/$(SERVICE) $(SERVDIR)/$(SERVNAME)
 	install -m 644 onedrive.conf $(CONFDIR)/onedrive.conf
-	install -m 644 onedrive.service /usr/lib/systemd/user
+	$(SERVINIT)
 
 uninstall:
 	rm -f $(DESTDIR)/onedrive
 	rm -f $(CONFDIR)/onedrive.conf
-	rm -f /usr/lib/systemd/user/onedrive.service
+	rm -f --preserve-root $(SERVDIR)/$(SERVNAME)
+	$(SERVINIT)
+
