@@ -12,7 +12,8 @@ else ifneq (, $(shell which initctl))
 SERVICE = upstart.conf
 SERVNAME = onedrive.conf
 SERVDIR = /etc/init
-SERVINIT = initctl reload-configuration
+SERVINIT = echo "manual" > $(SERVDIR)/onedrive.override && initctl reload-configuration
+SERVDEINIT = rm -f $(SERVDIR)/onedrive.override && initctl reload-configuration
 
 endif
 
@@ -51,7 +52,7 @@ unittest: $(SOURCES)
 	$(DC) -unittest -debug -g -gs $(DFLAGS) $(SOURCES)
 
 
-.PHONY: install uninstall
+.PHONY: install uninstallq
 install: bin/onedrive config/onedrive.conf
 	install bin/onedrive $(DESTDIR)/onedrive
 	-install -m 644 services/$(SERVICE) $(SERVDIR)/$(SERVNAME)
@@ -62,5 +63,5 @@ uninstall:
 	rm -f $(DESTDIR)/onedrive
 	rm -f $(CONFDIR)/onedrive.conf
 	rm -f --preserve-root $(SERVDIR)/$(SERVNAME)
-	$(SERVINIT)
+	$(SERVDEINIT)
 
