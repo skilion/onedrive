@@ -2,6 +2,7 @@ DC = dmd
 DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl
 DESTDIR = /usr/local/bin
 CONFDIR = /usr/local/etc
+CHECK_SYSTEMD = pidof systemd && echo true || echo false
 
 SOURCES = \
 	src/config.d \
@@ -30,7 +31,11 @@ clean:
 install: onedrive onedrive.conf
 	install onedrive $(DESTDIR)/onedrive
 	install -m 644 onedrive.conf $(CONFDIR)/onedrive.conf
-	install -m 644 onedrive.service /usr/lib/systemd/user
+	ifeq ($(CHECK_SYSTEMD), true))
+		install -m 644 onedrive.service /usr/lib/systemd/user
+	else
+	    install -m 644 onedrive.sysv /etc/init.d/onedrive
+	endif
 
 uninstall:
 	rm -f $(DESTDIR)/onedrive
