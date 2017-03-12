@@ -16,6 +16,8 @@ int main(string[] args)
 	bool logout;
 	// enable verbose logging
 	bool verbose;
+	// ignore upload errors
+	bool ignoreErrors;
 
 	try {
 		auto opt = getopt(
@@ -25,6 +27,7 @@ int main(string[] args)
 			"resync", "Forget the last saved state, perform a full sync.", &resync,
 			"logout", "Logout the current user.", &logout,
 			"confdir", "Set the directory to use to store the configuration files.", &configDirName,
+			"ignore-errors|i", "Ignore upload errors", &ignoreErrors,
 			"verbose|v", "Print more details, useful for debugging.", &log.verbose
 		);
 		if (opt.helpWanted) {
@@ -44,7 +47,7 @@ int main(string[] args)
 	log.vlog("Loading config ...");
 	configDirName = expandTilde(configDirName);
 	if (!exists(configDirName)) mkdir(configDirName);
-	auto cfg = new config.Config(configDirName);
+	auto cfg = new config.Config(configDirName, ignoreErrors);
 	cfg.init();
 
 	// upgrades
