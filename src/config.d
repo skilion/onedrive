@@ -8,18 +8,20 @@ final class Config
 	public string statusTokenFilePath;
 	public string databaseFilePath;
 	public string uploadStateFilePath;
+	public bool ignoreUploadErrors;
 	public string syncListFilePath;
 
 	private string userConfigFilePath;
 	// hashmap for the values found in the user config file
 	private string[string] values;
 
-	this(string configDirName)
+	this(string configDirName, bool ignoreErrors)
 	{
 		refreshTokenFilePath = configDirName ~ "/refresh_token";
 		statusTokenFilePath = configDirName ~ "/status_token";
 		databaseFilePath = configDirName ~ "/items.sqlite3";
 		uploadStateFilePath = configDirName ~ "/resume_upload";
+		ignoreUploadErrors = ignoreErrors;
 		userConfigFilePath = configDirName ~ "/config";
 		syncListFilePath = configDirName ~ "/sync_list";
 	}
@@ -82,7 +84,7 @@ final class Config
 
 unittest
 {
-	auto cfg = new Config("");
+	auto cfg = new Config("", false);
 	cfg.load("config");
 	assert(cfg.getValue("sync_dir") == "~/OneDrive");
 	assert(cfg.getValue("empty", "default") == "default");
