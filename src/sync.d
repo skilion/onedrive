@@ -188,7 +188,7 @@ final class SyncEngine
 
 		// compute the path of the item
 		string path = ".";
-		if (parentId) {
+		if (parentId && !isItemDeleted(item)) {
 			path = itemdb.computePath(parentId) ~ "/" ~ name;
 			// selective sync
 			if (selectiveSync.isPathExcluded(path)) {
