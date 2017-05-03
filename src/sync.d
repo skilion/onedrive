@@ -275,7 +275,7 @@ final class SyncEngine
 		assert(oldItem.type == newItem.type);
 
 		if (oldItem.eTag != newItem.eTag) {
-			string oldPath = itemdb.computePath(oldItem.id);
+			string oldPath = itemdb.computePath(oldItem.parentId) ~ '/' ~ oldItem.name;
 			if (oldPath != newPath) {
 				log.log("Moving: ", oldPath, " -> ", newPath);
 				if (exists(newPath)) {
