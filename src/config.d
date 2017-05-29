@@ -28,6 +28,7 @@ final class Config
 	{
 		setValue("sync_dir", "~/OneDrive");
 		setValue("skip_file", ".*|~*");
+		setValue("skip_dir", "");
 		if (!load(userConfigFilePath)) {
 			log.vlog("No config file found, using defaults");
 		}
