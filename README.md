@@ -18,7 +18,7 @@ OneDrive Free Client
 
 ### Dependencies: Ubuntu
 ```
-sudo apt-get install libcurl-dev
+sudo apt-get install libcurl4-openssl-dev
 sudo apt-get install libsqlite3-dev
 sudo wget http://master.dl.sourceforge.net/project/d-apt/files/d-apt.list -O /etc/apt/sources.list.d/d-apt.list
 wget -qO - http://dlang.org/d-keyring.gpg | sudo apt-key add -
@@ -27,7 +27,7 @@ sudo apt-get update && sudo apt-get install dmd-bin
 
 ### Installation
 ```
-git clone git@github.com:skilion/onedrive.git
+git clone https://github.com/skilion/onedrive.git
 cd onedrive
 make
 sudo make install
