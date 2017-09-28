@@ -1,3 +1,4 @@
+DMD = dmd
 DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl -J.
 PREFIX = /usr/local
 
@@ -21,20 +22,20 @@ clean:
 	rm -f onedrive onedrive.o onedrive.service
 
 debug: version $(SOURCES)
-	dmd -debug -g -gs $(DFLAGS) $(SOURCES)
+	$(DMD) -debug -g -gs $(DFLAGS) $(SOURCES)
 
 install: all
 	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
 	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
 
 onedrive: version $(SOURCES)
-	dmd -g -inline -O -release $(DFLAGS) $(SOURCES)
+	$(DMD) -g -inline -O -release $(DFLAGS) $(SOURCES)
 
 onedrive.service:
 	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
 
 unittest: $(SOURCES)
-	dmd -debug -g -gs -unittest $(DFLAGS) $(SOURCES)
+	$(DMD) -debug -g -gs -unittest $(DFLAGS) $(SOURCES)
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/onedrive
