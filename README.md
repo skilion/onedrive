@@ -49,6 +49,7 @@ After installing the application you must run it at least once from the terminal
 
 You will be asked to open a specific link using your web browser where you must login into your Microsoft Account and give the application permission to access your files. The request will look like this:
 ```sh
+$ onedrive
 Authorize this app visiting:
 
 https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=etc
