@@ -34,11 +34,11 @@ curl -fsS https://dlang.org/install.sh | bash -s dmd
 ```
 
 ### Installation
-Installation involves activating the dlang compiler, compiling the code, installing the binary and then deactivating dlang:
+Installation involves cloning this repo, activating the dlang compiler, compiling the code, installing the binary and then deactivating dlang:
 ```sh
-source ~/dlang/dmd-2.077.0/activate
 git clone https://github.com/skilion/onedrive.git
 cd onedrive
+source ~/dlang/dmd-2.077.0/activate
 make
 sudo make install
 deactivate
