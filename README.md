@@ -51,13 +51,13 @@ You will be asked to open a specific link using your web browser where you must 
 ```sh
 Authorize this app visiting:
 
-https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=22c49a0d-d21c-4792-aed1-8f163c982546&scope=files.readwrite%20files.readwrite.all%20offline_access&response_type=code&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=etc
 
 Enter the response uri: 
 ```
 Open the link in your browser, and after authorizing the app you will be redirected to a blank page. Copy the URI of the blank page into the application and enter it in the terminal:
 ```sh
-Enter the response uri: https://login.microsoftonline.com/common/oauth2/nativeclient?code=OAQABAAIAAABHh4kmS_aKT5X
+Enter the response uri: https://login.microsoftonline.com/common/oauth2/nativeclient?code=etc
 ```
 The application will then start to sync with OneDrive.
 
