@@ -45,9 +45,9 @@ deactivate
 ```
 
 ### First run :zap:
-After installing the application you must run it at least one time from the terminal to authorize it. 
+After installing the application you must run it at least once from the terminal to authorize it. 
 
-You will be asked to use your web browser to open a specific link where you will have to login into your Microsoft Account and give the application the permission to access your files. The request will look like this:
+You will be asked to open a specific link using your web browser where you must login into your Microsoft Account and give the application permission to access your files. The request will look like this:
 ```sh
 Authorize this app visiting:
 
@@ -55,9 +55,9 @@ https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=22c49a0
 
 Enter the response uri: 
 ```
-After opening the link in your browser, you must authorize the app, after which you will be redirected to a blank page. Copy the URI of the blank page into the application and enter it in the terminal where it says:
+Open the link in your browser, and after authorizing the app you will be redirected to a blank page. Copy the URI of the blank page into the application and enter it in the terminal:
 ```sh
-Enter the response uri: 
+Enter the response uri: https://login.microsoftonline.com/common/oauth2/nativeclient?code=OAQABAAIAAABHh4kmS_aKT5X
 ```
 The application will then start to sync with OneDrive.
 
