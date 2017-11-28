@@ -3,7 +3,7 @@ Description=OneDrive Free Client
 Documentation=https://github.com/skilion/onedrive
 
 [Service]
-ExecStart=@PREFIX@/bin/onedrive -m
+ExecStart=@PREFIX@/bin/onedrive -m -v
 Restart=no
 
 [Install]

@@ -1,5 +1,5 @@
 DFLAGS = -ofonedrive -L-lcurl -L-lsqlite3 -L-ldl -J.
-PREFIX = /usr/local
+PREFIX = ${HOME}/.local
 
 SOURCES = \
 	src/config.d \
@@ -24,21 +24,23 @@ debug: version $(SOURCES)
 	dmd -debug -g -gs $(DFLAGS) $(SOURCES)
 
 install: all
-	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
-	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
+	install -D onedrive $(PREFIX)/bin/onedrive
+	install -D -m 644 onedrive.service $(PREFIX)/share/systemd/user/onedrive.service
 
 onedrive: version $(SOURCES)
 	dmd -g -inline -O -release $(DFLAGS) $(SOURCES)
 
-onedrive.service:
+onedrive.service: onedrive.service.in
 	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
 
 unittest: $(SOURCES)
 	dmd -debug -g -gs -unittest $(DFLAGS) $(SOURCES)
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/onedrive
-	rm -f $(DESTDIR)/usr/lib/systemd/user/onedrive.service
+	rm -f $(PREFIX)/bin/onedrive
+	rm -f $(PREFIX)/share/systemd/user/onedrive.service
+	$(info You still need to remove your OneDrive directory)
+	$(info and config files manually)
 
 version: .git/HEAD .git/index
 	echo $(shell git describe --tags 2>/dev/null) >version
