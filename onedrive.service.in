@@ -4,7 +4,7 @@ Documentation=https://github.com/skilion/onedrive
 
 [Service]
 ExecStart=@PREFIX@/bin/onedrive -m
-Restart=no
+Restart=always
 
 [Install]
 WantedBy=default.target
