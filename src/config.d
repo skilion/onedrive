@@ -28,6 +28,7 @@ final class Config
 	{
 		setValue("sync_dir", "~/OneDrive");
 		setValue("skip_file", ".*|~*");
+		setValue("drive_url", "https://graph.microsoft.com/v1.0/me/drive");
 		if (!load(userConfigFilePath)) {
 			log.vlog("No config file found, using defaults");
 		}

@@ -10,10 +10,11 @@ private immutable {
 	string authUrl = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 	string redirectUrl = "https://login.microsoftonline.com/common/oauth2/nativeclient";
 	string tokenUrl = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-	string driveUrl = "https://graph.microsoft.com/v1.0/me/drive";
-	string itemByIdUrl = "https://graph.microsoft.com/v1.0/me/drive/items/";
-	string itemByPathUrl = "https://graph.microsoft.com/v1.0/me/drive/root:/";
 	string driveByIdUrl = "https://graph.microsoft.com/v1.0/drives/";
+}
+private {
+	string driveUrl = "https://graph.microsoft.com/v1.0/me/drive";
+	string driveId = "";
 }
 
 class OneDriveException: Exception
@@ -58,6 +59,13 @@ final class OneDriveApi
 
 	bool init()
 	{
+		try {
+			driveId = cfg.getValue("drive_id");
+			if (driveId.length) {
+				driveUrl = driveByIdUrl ~ driveId;
+			}
+		} catch (Exception e) {}
+
 		try {
 			refreshToken = readText(cfg.refreshTokenFilePath);
 		} catch (FileException e) {
@@ -106,19 +114,6 @@ final class OneDriveApi
 		const(char)[] url = deltaLink;
 		if (url == null) {
 			url = driveByIdUrl ~ driveId ~ "/items/" ~ id ~ "/delta";
-			url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
-		}
-		return get(url);
-	}
-
-	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delta
-	JSONValue viewChangesByPath(const(char)[] path, const(char)[] deltaLink)
-	{
-		checkAccessTokenExpired();
-		const(char)[] url = deltaLink;
-		if (url == null) {
-			if (path == ".") url = driveUrl ~ "/root/delta";
-			else url = itemByPathUrl ~ encodeComponent(path) ~ ":/delta";
 			url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
 		}
 		return get(url);
