@@ -14,6 +14,13 @@
 
 ## Setup
 
+### Packages
+
+Packages are available in the Fedora repos, install with:
+```sh
+sudo dnf install onedrive
+```
+
 ### Dependencies
 * [libcurl](http://curl.haxx.se/libcurl/)
 * [SQLite 3](https://www.sqlite.org/)
