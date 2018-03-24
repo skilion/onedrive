@@ -461,7 +461,7 @@ final class SyncEngine
 		}
 
 		if (!isValidName(path)) {
-			log.log("The item: ", path, " is invalid name. It's not uploaded.");
+			log.log("Invalid name, skipping: ", path);
 			return;
 		}
 
@@ -572,7 +572,7 @@ final class SyncEngine
 		}
 
 		if (!isValidName(path)) {
-			log.log("The item: ", path, " is invalid name. It's not uploaded.");
+			log.log("Invalid name, skipping: ", path);
 			return;
 		}
 

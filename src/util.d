@@ -142,13 +142,13 @@ bool isValidName(string path)
 	// https://msdn.microsoft.com/en-us/library/aa365247
 	auto invalidNameReg =
 		ctRegex!(
-					// leading whitespace and trailing whitespace/dot
-					`^\s.*|^.*[\s\.]$|`
-					// invalid character
-					`.*[#%<>:"\|\?*/\\].*|`
-					// reserved device name and trailing .~
-					`(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:[.].+)?$`
-					);
+			// leading whitespace and trailing whitespace/dot
+			`^\s.*|^.*[\s\.]$|` ~
+			// invalid character
+			`.*[#%<>:"\|\?*/\\].*|` ~
+			// reserved device name and trailing .~
+			`(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:[.].+)?$`
+		);
 	auto m = match(itemName, invalidNameReg);
 
 	return m.empty;
