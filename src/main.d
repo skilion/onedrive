@@ -1,13 +1,18 @@
 import core.stdc.stdlib: EXIT_SUCCESS, EXIT_FAILURE;
 import core.memory, core.time, core.thread;
-import std.getopt, std.file, std.path, std.process;
-import config, itemdb, monitor, onedrive, sync, util;
+import std.getopt, std.file, std.path, std.process, std.stdio;
+import config, itemdb, monitor, onedrive, selective, sync, util;
 static import log;
+
+// only download remote changes
+bool downloadOnly;
 
 int main(string[] args)
 {
 	// configuration directory
-	string configDirName = expandTilde(environment.get("XDG_CONFIG_HOME", "~/.config")) ~ "/onedrive";
+	string configDirName = environment.get("XDG_CONFIG_HOME", "~/.config") ~ "/onedrive";
+	// override the sync directory
+	string syncDirName;
 	// enable monitor mode
 	bool monitor;
 	// force a full resync
@@ -16,40 +21,68 @@ int main(string[] args)
 	bool logout;
 	// enable verbose logging
 	bool verbose;
+	// print the access token
+	bool printAccessToken;
+	// print the version and exit
+	bool printVersion;
 
 	try {
 		auto opt = getopt(
 			args,
 			std.getopt.config.bundling,
-			"monitor|m", "Keep monitoring for local and remote changes.", &monitor,
-			"resync", "Forget the last saved state, perform a full sync.", &resync,
-			"logout", "Logout the current user.", &logout,
-			"confdir", "Set the directory to use to store the configuration files.", &configDirName,
-			"verbose|v", "Print more details, useful for debugging.", &log.verbose
+			std.getopt.config.caseSensitive,
+			"confdir", "Set the directory used to store the configuration files", &configDirName,
+			"download|d", "Only download remote changes", &downloadOnly,
+			"logout", "Logout the current user", &logout,
+			"monitor|m", "Keep monitoring for local and remote changes", &monitor,
+			"print-token", "Print the access token, useful for debugging", &printAccessToken,
+			"resync", "Forget the last saved state, perform a full sync", &resync,
+			"syncdir", "Set the directory used to sync the files that are synced", &syncDirName,
+			"verbose|v", "Print more details, useful for debugging", &log.verbose,
+			"version", "Print the version and exit", &printVersion
 		);
 		if (opt.helpWanted) {
 			defaultGetoptPrinter(
 				"Usage: onedrive [OPTION]...\n\n" ~
-				"no option    Sync and exit.",
+				"no option        Sync and exit",
 				opt.options
 			);
 			return EXIT_SUCCESS;
 		}
 	} catch (GetOptException e) {
-		log.log(e.msg);
-		log.log("Try 'onedrive -h' for more information.");
+		log.error(e.msg);
+		log.error("Try 'onedrive -h' for more information");
 		return EXIT_FAILURE;
+	}
+	
+	// disable buffering on stdout
+	stdout.setvbuf(0, _IONBF);
+
+	if (printVersion) {
+		std.stdio.write("onedrive ", import("version"));
+		return EXIT_SUCCESS;
 	}
 
 	log.vlog("Loading config ...");
-	configDirName = expandTilde(configDirName);
-	if (!exists(configDirName)) mkdir(configDirName);
+	configDirName = configDirName.expandTilde().absolutePath();
+	if (!exists(configDirName)) mkdirRecurse(configDirName);
 	auto cfg = new config.Config(configDirName);
 	cfg.init();
+	
+	// command line parameters override the config
+	if (syncDirName) cfg.setValue("sync_dir", syncDirName);
+
+	// upgrades
+	if (exists(configDirName ~ "/items.db")) {
+		remove(configDirName ~ "/items.db");
+		log.log("Database schema changed, resync needed");
+		resync = true;
+	}
+
 	if (resync || logout) {
-		log.log("Deleting the saved status ...");
+		log.vlog("Deleting the saved status ...");
 		safeRemove(cfg.databaseFilePath);
-		safeRemove(cfg.statusTokenFilePath);
+		safeRemove(cfg.deltaLinkFilePath);
 		safeRemove(cfg.uploadStateFilePath);
 		if (logout) {
 			safeRemove(cfg.refreshTokenFilePath);
@@ -59,12 +92,13 @@ int main(string[] args)
 	log.vlog("Initializing the OneDrive API ...");
 	bool online = testNetwork();
 	if (!online && !monitor) {
-		log.log("No network connection");
+		log.error("No network connection");
 		return EXIT_FAILURE;
 	}
 	auto onedrive = new OneDriveApi(cfg);
+	onedrive.printAccessToken = printAccessToken;
 	if (!onedrive.init()) {
-		log.log("Could not initialize the OneDrive API");
+		log.error("Could not initialize the OneDrive API");
 		// workaround for segfault in std.net.curl.Curl.shutdown() on exit
 		onedrive.http.shutdown();
 		return EXIT_FAILURE;
@@ -75,22 +109,25 @@ int main(string[] args)
 
 	string syncDir = expandTilde(cfg.getValue("sync_dir"));
 	log.vlog("All operations will be performed in: ", syncDir);
-	if (!exists(syncDir)) mkdir(syncDir);
+	if (!exists(syncDir)) mkdirRecurse(syncDir);
 	chdir(syncDir);
 
 	log.vlog("Initializing the Synchronization Engine ...");
-	auto sync = new SyncEngine(cfg, onedrive, itemdb);
+	auto selectiveSync = new SelectiveSync();
+	selectiveSync.load(cfg.syncListFilePath);
+	selectiveSync.setMask(cfg.getValue("skip_file"));
+	auto sync = new SyncEngine(cfg, onedrive, itemdb, selectiveSync);
 	sync.init();
 	if (online) performSync(sync);
 
 	if (monitor) {
 		log.vlog("Initializing monitor ...");
-		Monitor m;
+		Monitor m = new Monitor(selectiveSync);
 		m.onDirCreated = delegate(string path) {
 			log.vlog("[M] Directory created: ", path);
 			try {
 				sync.scanForDifferences(path);
-			} catch(SyncException e) {
+			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
@@ -98,7 +135,7 @@ int main(string[] args)
 			log.vlog("[M] File changed: ", path);
 			try {
 				sync.scanForDifferences(path);
-			} catch(SyncException e) {
+			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
@@ -106,7 +143,7 @@ int main(string[] args)
 			log.vlog("[M] Item deleted: ", path);
 			try {
 				sync.deleteByPath(path);
-			} catch(SyncException e) {
+			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
@@ -114,24 +151,26 @@ int main(string[] args)
 			log.vlog("[M] Item moved: ", from, " -> ", to);
 			try {
 				sync.uploadMoveItem(from, to);
-			} catch(SyncException e) {
+			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
-		m.init(cfg, verbose);
+		if (!downloadOnly) m.init(cfg, verbose);
 		// monitor loop
 		immutable auto checkInterval = dur!"seconds"(45);
 		auto lastCheckTime = MonoTime.currTime();
 		while (true) {
-			m.update(online);
+			if (!downloadOnly) m.update(online);
 			auto currTime = MonoTime.currTime();
 			if (currTime - lastCheckTime > checkInterval) {
 				lastCheckTime = currTime;
 				online = testNetwork();
 				if (online) {
 					performSync(sync);
-					// discard all events that may have been generated by the sync
-					m.update(false);
+					if (!downloadOnly) {
+						// discard all events that may have been generated by the sync
+						m.update(false);
+					}
 				}
 				GC.collect();
 			} else {
@@ -152,9 +191,13 @@ void performSync(SyncEngine sync)
 	do {
 		try {
 			sync.applyDifferences();
-			sync.scanForDifferences(".");
+			if (!downloadOnly) {
+				sync.scanForDifferences();
+				// ensure that the current state is updated
+				sync.applyDifferences();
+			}
 			count = -1;
-		} catch (SyncException e) {
+		} catch (Exception e) {
 			if (++count == 3) throw e;
 			else log.log(e.msg);
 		}

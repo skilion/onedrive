@@ -1,14 +1,17 @@
-import std.datetime, std.path, std.string;
+import std.datetime;
+import std.exception;
+import std.path;
+import std.string;
 import sqlite;
 
-enum ItemType
-{
+enum ItemType {
 	file,
-	dir
+	dir,
+	remote
 }
 
-struct Item
-{
+struct Item {
+	string   driveId;
 	string   id;
 	string   name;
 	ItemType type;
@@ -16,127 +19,118 @@ struct Item
 	string   cTag;
 	SysTime  mtime;
 	string   parentId;
-	string   crc32;
+	string   crc32Hash;
+	string   sha1Hash;
+	string   quickXorHash;
+	string   remoteDriveId;
+	string   remoteId;
 }
 
 final class ItemDatabase
 {
+	// increment this for every change in the db schema
+	immutable int itemDatabaseVersion = 6;
+
 	Database db;
 	Statement insertItemStmt;
 	Statement updateItemStmt;
 	Statement selectItemByIdStmt;
 	Statement selectItemByParentIdStmt;
+	Statement deleteItemByIdStmt;
 
 	this(const(char)[] filename)
 	{
 		db = Database(filename);
-		db.exec("CREATE TABLE IF NOT EXISTS item (
-			id       TEXT PRIMARY KEY,
-			name     TEXT NOT NULL,
-			type     TEXT NOT NULL,
-			eTag     TEXT NOT NULL,
-			cTag     TEXT NOT NULL,
-			mtime    TEXT NOT NULL,
-			parentId TEXT,
-			crc32    TEXT,
-			FOREIGN KEY (parentId) REFERENCES item (id) ON DELETE CASCADE
-		)");
-		db.exec("CREATE INDEX IF NOT EXISTS name_idx ON item (name)");
+		if (db.getVersion() == 0) {
+			db.exec("CREATE TABLE item (
+				driveId          TEXT NOT NULL,
+				id               TEXT NOT NULL,
+				name             TEXT NOT NULL,
+				type             TEXT NOT NULL,
+				eTag             TEXT,
+				cTag             TEXT,
+				mtime            TEXT NOT NULL,
+				parentId         TEXT,
+				crc32Hash        TEXT,
+				sha1Hash         TEXT,
+				quickXorHash     TEXT,
+				remoteDriveId    TEXT,
+				remoteId         TEXT,
+				deltaLink        TEXT,
+				PRIMARY KEY (driveId, id),
+				FOREIGN KEY (driveId, parentId)
+				REFERENCES item (driveId, id)
+				ON DELETE CASCADE
+				ON UPDATE RESTRICT
+			)");
+			db.exec("CREATE INDEX name_idx ON item (name)");
+			db.exec("CREATE INDEX remote_idx ON item (remoteDriveId, remoteId)");
+			db.setVersion(itemDatabaseVersion);
+		} else if (db.getVersion() != itemDatabaseVersion) {
+			throw new Exception("The item database is incompatible, please resync manually");
+		}
 		db.exec("PRAGMA foreign_keys = ON");
 		db.exec("PRAGMA recursive_triggers = ON");
-		insertItemStmt = db.prepare("INSERT OR REPLACE INTO item (id, name, type, eTag, cTag, mtime, parentId, crc32) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+		insertItemStmt = db.prepare("
+			INSERT OR REPLACE INTO item (driveId, id, name, type, eTag, cTag, mtime, parentId, crc32Hash, sha1Hash, quickXorHash, remoteDriveId, remoteId)
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+		");
 		updateItemStmt = db.prepare("
 			UPDATE item
-			SET name = ?2, type = ?3, eTag = ?4, cTag = ?5, mtime = ?6, parentId = ?7, crc32 = ?8
-			WHERE id = ?1
+			SET name = ?3, type = ?4, eTag = ?5, cTag = ?6, mtime = ?7, parentId = ?8, crc32Hash = ?9, sha1Hash = ?10, quickXorHash = ?11, remoteDriveId = ?12, remoteId = ?13
+			WHERE driveId = ?1 AND id = ?2
 		");
-		selectItemByIdStmt = db.prepare("SELECT id, name, type, eTag, cTag, mtime, parentId, crc32 FROM item WHERE id = ?");
-		selectItemByParentIdStmt = db.prepare("SELECT id FROM item WHERE parentId = ?");
+		selectItemByIdStmt = db.prepare("
+			SELECT *
+			FROM item
+			WHERE driveId = ?1 AND id = ?2
+		");
+		selectItemByParentIdStmt = db.prepare("SELECT * FROM item WHERE driveId = ? AND parentId = ?");
+		deleteItemByIdStmt = db.prepare("DELETE FROM item WHERE driveId = ? AND id = ?");
 	}
 
-	void insert(const(char)[] id, const(char)[] name, ItemType type, const(char)[] eTag, const(char)[] cTag, const(char)[] mtime, const(char)[] parentId, const(char)[] crc32)
+	void insert(const ref Item item)
 	{
-		with (insertItemStmt) {
-			bind(1, id);
-			bind(2, name);
-			string typeStr = void;
-			final switch (type) {
-			case ItemType.file: typeStr = "file"; break;
-			case ItemType.dir:  typeStr = "dir";  break;
-			}
-			bind(3, typeStr);
-			bind(4, eTag);
-			bind(5, cTag);
-			bind(6, mtime);
-			bind(7, parentId);
-			bind(8, crc32);
-			exec();
-		}
+		bindItem(item, insertItemStmt);
+		insertItemStmt.exec();
 	}
 
-	void update(const(char)[] id, const(char)[] name, ItemType type, const(char)[] eTag, const(char)[] cTag, const(char)[] mtime, const(char)[] parentId, const(char)[] crc32)
+	void update(const ref Item item)
 	{
-		with (updateItemStmt) {
-			bind(1, id);
-			bind(2, name);
-			string typeStr = void;
-			final switch (type) {
-			case ItemType.file: typeStr = "file"; break;
-			case ItemType.dir:  typeStr = "dir";  break;
-			}
-			bind(3, typeStr);
-			bind(4, eTag);
-			bind(5, cTag);
-			bind(6, mtime);
-			bind(7, parentId);
-			bind(8, crc32);
-			exec();
-		}
+		bindItem(item, updateItemStmt);
+		updateItemStmt.exec();
 	}
 
-	void upsert(const(char)[] id, const(char)[] name, ItemType type, const(char)[] eTag, const(char)[] cTag, const(char)[] mtime, const(char)[] parentId, const(char)[] crc32)
+	void upsert(const ref Item item)
 	{
-		auto s = db.prepare("SELECT COUNT(*) FROM item WHERE id = ?");
-		s.bind(1, id);
+		auto s = db.prepare("SELECT COUNT(*) FROM item WHERE driveId = ? AND id = ?");
+		s.bind(1, item.driveId);
+		s.bind(2, item.id);
 		auto r = s.exec();
-		Statement* p;
-		if (r.front[0] == "0") p = &insertItemStmt;
-		else p = &updateItemStmt;
-		with (p) {
-			bind(1, id);
-			bind(2, name);
-			string typeStr = void;
-			final switch (type) {
-			case ItemType.file: typeStr = "file"; break;
-			case ItemType.dir:  typeStr = "dir";  break;
-			}
-			bind(3, typeStr);
-			bind(4, eTag);
-			bind(5, cTag);
-			bind(6, mtime);
-			bind(7, parentId);
-			bind(8, crc32);
-			exec();
-		}
+		Statement* stmt;
+		if (r.front[0] == "0") stmt = &insertItemStmt;
+		else stmt = &updateItemStmt;
+		bindItem(item, *stmt);
+		stmt.exec();
 	}
 
-	Item[] selectChildren(const(char)[] id)
+	Item[] selectChildren(const(char)[] driveId, const(char)[] id)
 	{
-		selectItemByParentIdStmt.bind(1, id);
+		selectItemByParentIdStmt.bind(1, driveId);
+		selectItemByParentIdStmt.bind(2, id);
 		auto res = selectItemByParentIdStmt.exec();
 		Item[] items;
-		foreach (row; res) {
-			Item item;
-			bool found = selectById(row[0], item);
-			assert(found);
-			items ~= item;
+		while (!res.empty) {
+			items ~= buildItem(res);
+			res.step();
 		}
 		return items;
 	}
 
-	bool selectById(const(char)[] id, out Item item)
+	bool selectById(const(char)[] driveId, const(char)[] id, out Item item)
 	{
-		selectItemByIdStmt.bind(1, id);
+		selectItemByIdStmt.bind(1, driveId);
+		selectItemByIdStmt.bind(2, id);
 		auto r = selectItemByIdStmt.exec();
 		if (!r.empty) {
 			item = buildItem(r);
@@ -145,121 +139,195 @@ final class ItemDatabase
 		return false;
 	}
 
-	bool selectByPath(const(char)[] path, out Item item)
+	// returns the item with the given path
+	// the path is relative to the sync directory ex: "./Music/Turbo Killer.mp3"
+	bool selectByPath(const(char)[] path, string rootDriveId, out Item item)
 	{
-		path = "root/" ~ path.chompPrefix("."); // HACK
-
-		// initialize the search
-		string[2][] candidates; // [id, parentId]
-		auto s = db.prepare("SELECT id, parentId FROM item WHERE name = ?");
-		s.bind(1, baseName(path));
-		auto r = s.exec();
-		foreach (row; r) candidates ~= [row[0].dup, row[1].dup];
-		path = dirName(path);
-
-		if (path != ".") {
-			s = db.prepare("SELECT parentId FROM item WHERE id = ? AND name = ?");
-			// discard the candidates that do not have the correct parent
-			do {
-				s.bind(2, baseName(path));
-				string[2][] newCandidates;
-				newCandidates.reserve(candidates.length);
-				foreach (candidate; candidates) {
-					s.bind(1, candidate[1]);
-					r = s.exec();
-					if (!r.empty) {
-						string[2] c = [candidate[0], r.front[0].idup];
-						newCandidates ~= c;
-					}
-				}
-				candidates = newCandidates;
-				path = dirName(path);
-			} while (path != ".");
-		}
-
-		// reached the root
-		string[2][] newCandidates;
-		foreach (candidate; candidates) {
-			if (!candidate[1]) {
-				newCandidates ~= candidate;
-			}
-		}
-		candidates = newCandidates;
-		assert(candidates.length <= 1);
-
-		if (candidates.length == 1) return selectById(candidates[0][0], item);
-		return false;
-	}
-
-	void deleteById(const(char)[] id)
-	{
-		auto s = db.prepare("DELETE FROM item WHERE id = ?");
-		s.bind(1, id);
-		s.exec();
-	}
-
-	// returns true if the item has the specified parent
-	bool hasParent(T)(const(char)[] itemId, T parentId)
-	if (is(T : const(char)[]) || is(T : const(char[])[]))
-	{
-		auto s = db.prepare("SELECT parentId FROM item WHERE id = ?");
-		while (true) {
-			s.bind(1, itemId);
+		Item currItem = { driveId: rootDriveId };
+		path = "root/" ~ path.chompPrefix(".");
+		auto s = db.prepare("SELECT * FROM item WHERE name = ?1 AND driveId IS ?2 AND parentId IS ?3");
+		foreach (name; pathSplitter(path)) {
+			s.bind(1, name);
+			s.bind(2, currItem.driveId);
+			s.bind(3, currItem.id);
 			auto r = s.exec();
-			if (r.empty) break;
-			auto currParentId = r.front[0];
-			static if (is(T : const(char)[])) {
-				if (currParentId == parentId) return true;
-			} else {
-				foreach (id; parentId) if (currParentId == id) return true;
+			if (r.empty) return false;
+			currItem = buildItem(r);
+			// if the item is of type remote substitute it with the child
+			if (currItem.type == ItemType.remote) {
+				Item child;
+				if (selectById(currItem.remoteDriveId, currItem.remoteId, child)) {
+					assert(child.type != ItemType.remote, "The type of the child cannot be remote");
+					currItem = child;
+				}
 			}
-			itemId = currParentId.dup;
 		}
-		return false;
+		item = currItem;
+		return true;
+	}
+
+	// same as selectByPath() but it does not traverse remote folders
+	bool selectByPathNoRemote(const(char)[] path, string rootDriveId, out Item item)
+	{
+		Item currItem = { driveId: rootDriveId };
+		path = "root/" ~ path.chompPrefix(".");
+		auto s = db.prepare("SELECT * FROM item WHERE name IS ?1 AND driveId IS ?2 AND parentId IS ?3");
+		foreach (name; pathSplitter(path)) {
+			s.bind(1, name);
+			s.bind(2, currItem.driveId);
+			s.bind(3, currItem.id);
+			auto r = s.exec();
+			if (r.empty) return false;
+			currItem = buildItem(r);
+		}
+		item = currItem;
+		return true;
+	}
+
+	void deleteById(const(char)[] driveId, const(char)[] id)
+	{
+		deleteItemByIdStmt.bind(1, driveId);
+		deleteItemByIdStmt.bind(2, id);
+		deleteItemByIdStmt.exec();
+	}
+
+	private void bindItem(const ref Item item, ref Statement stmt)
+	{
+		with (stmt) with (item) {
+			bind(1, driveId);
+			bind(2, id);
+			bind(3, name);
+			string typeStr = null;
+			final switch (type) with (ItemType) {
+				case file:    typeStr = "file";    break;
+				case dir:     typeStr = "dir";     break;
+				case remote:  typeStr = "remote";  break;
+			}
+			bind(4, typeStr);
+			bind(5, eTag);
+			bind(6, cTag);
+			bind(7, mtime.toISOExtString());
+			bind(8, parentId);
+			bind(9, crc32Hash);
+			bind(10, sha1Hash);
+			bind(11, quickXorHash);
+			bind(12, remoteDriveId);
+			bind(13, remoteId);
+		}
 	}
 
 	private Item buildItem(Statement.Result result)
 	{
-		assert(!result.empty && result.front.length == 8);
+		assert(!result.empty, "The result must not be empty");
+		assert(result.front.length == 14, "The result must have 14 columns");
 		Item item = {
-			id: result.front[0].dup,
-			name: result.front[1].dup,
-			eTag: result.front[3].dup,
-			cTag: result.front[4].dup,
-			mtime: SysTime.fromISOExtString(result.front[5]),
-			parentId: result.front[6].dup,
-			crc32: result.front[7].dup
+			driveId: result.front[0].dup,
+			id: result.front[1].dup,
+			name: result.front[2].dup,
+			eTag: result.front[4].dup,
+			cTag: result.front[5].dup,
+			mtime: SysTime.fromISOExtString(result.front[6]),
+			parentId: result.front[7].dup,
+			crc32Hash: result.front[8].dup,
+			sha1Hash: result.front[9].dup,
+			quickXorHash: result.front[10].dup,
+			remoteDriveId: result.front[11].dup,
+			remoteId: result.front[12].dup
 		};
-		switch (result.front[2]) {
-		case "file": item.type = ItemType.file; break;
-		case "dir":  item.type = ItemType.dir;  break;
-		default: assert(0);
+		switch (result.front[3]) {
+			case "file":    item.type = ItemType.file;    break;
+			case "dir":     item.type = ItemType.dir;     break;
+			case "remote":  item.type = ItemType.remote;  break;
+			default: assert(0, "Invalid item type");
 		}
 		return item;
 	}
 
-	string computePath(const(char)[] id)
+	// computes the path of the given item id
+	// the path is relative to the sync directory ex: "Music/Turbo Killer.mp3"
+	// the trailing slash is not added even if the item is a directory
+	string computePath(const(char)[] driveId, const(char)[] id)
 	{
-		if (!id) return null;
+		assert(driveId && id);
 		string path;
-		auto s = db.prepare("SELECT name, parentId FROM item WHERE id = ?");
+		Item item;
+		auto s = db.prepare("SELECT * FROM item WHERE driveId = ?1 AND id = ?2");
+		auto s2 = db.prepare("SELECT driveId, id FROM item WHERE remoteDriveId = ?1 AND remoteId = ?2");
 		while (true) {
-			s.bind(1, id);
+			s.bind(1, driveId);
+			s.bind(2, id);
 			auto r = s.exec();
-			if (r.empty) {
-				// no results
-				break;
-			} else if (r.front[1]) {
-				if (path) path = r.front[0].idup ~ "/" ~ path;
-				else path = r.front[0].idup;
+			if (!r.empty) {
+				item = buildItem(r);
+				if (item.type == ItemType.remote) {
+					// substitute the last name with the current
+					ptrdiff_t idx = indexOf(path, '/');
+					path = idx >= 0 ? item.name ~ path[idx .. $] : item.name;
+				} else {
+					if (path) path = item.name ~ "/" ~ path;
+					else path = item.name;
+				}
+				id = item.parentId;
 			} else {
-				// root
-				if (path) path = "./" ~ path;
-				else path = ".";
-				break;
+				if (id == null) {
+					// check for remoteItem
+					s2.bind(1, item.driveId);
+					s2.bind(2, item.id);
+					auto r2 = s2.exec();
+					if (r2.empty) {
+						// root reached
+						assert(path.length >= 4);
+						// remove "root"
+						if (path.length >= 5) path = path[5 .. $];
+						else path = path[4 .. $];
+						// special case of computing the path of the root itself
+						if (path.length == 0) path = ".";
+						break;
+					} else {
+						// remote folder
+						driveId = r2.front[0].dup;
+						id = r2.front[1].dup;
+					}
+				} else {
+					// broken tree
+					assert(0);
+				}
 			}
-			id = r.front[1].dup;
 		}
 		return path;
+	}
+
+	Item[] selectRemoteItems()
+	{
+		Item[] items;
+		auto stmt = db.prepare("SELECT * FROM item WHERE remoteDriveId IS NOT NULL");
+		auto res = stmt.exec();
+		while (!res.empty) {
+			items ~= buildItem(res);
+			res.step();
+		}
+		return items;
+	}
+
+	string getDeltaLink(const(char)[] driveId, const(char)[] id)
+	{
+		assert(driveId && id);
+		auto stmt = db.prepare("SELECT deltaLink FROM item WHERE driveId = ?1 AND id = ?2");
+		stmt.bind(1, driveId);
+		stmt.bind(2, id);
+		auto res = stmt.exec();
+		if (res.empty) return null;
+		return res.front[0].dup;
+	}
+
+	void setDeltaLink(const(char)[] driveId, const(char)[] id, const(char)[] deltaLink)
+	{
+		assert(driveId && id);
+		assert(deltaLink);
+		auto stmt = db.prepare("UPDATE item SET deltaLink = ?3 WHERE driveId = ?1 AND id = ?2");
+		stmt.bind(1, driveId);
+		stmt.bind(2, id);
+		stmt.bind(3, deltaLink);
+		stmt.exec();
 	}
 }

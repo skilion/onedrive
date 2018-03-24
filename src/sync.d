@@ -1,46 +1,106 @@
-import std.exception: ErrnoException;
-import std.algorithm, std.datetime, std.file, std.json, std.path, std.regex;
+import std.algorithm: find;
+import std.array: array;
+import std.datetime;
+import std.exception: enforce;
+import std.file, std.json, std.path;
+import std.regex;
 import std.stdio, std.string;
-import config, itemdb, onedrive, upload, util;
+import config, itemdb, onedrive, selective, upload, util;
 static import log;
 
 // threshold after which files will be uploaded using an upload session
-private long thresholdFileSize = 10 * 2^^20; // 10 MiB
+private long thresholdFileSize = 4 * 2^^20; // 4 MiB
 
 private bool isItemFolder(const ref JSONValue item)
 {
-	return (("folder" in item.object) !is null);
+	return ("folder" in item) != null;
 }
 
 private bool isItemFile(const ref JSONValue item)
 {
-	return (("file" in item.object) !is null);
+	return ("file" in item) != null;
 }
 
 private bool isItemDeleted(const ref JSONValue item)
 {
-	return (("deleted" in item.object) !is null);
+	return ("deleted" in item) != null;
 }
 
-private bool testCrc32(string path, const(char)[] crc32)
+private bool isItemRoot(const ref JSONValue item)
 {
-	if (crc32) {
-		string localCrc32 = computeCrc32(path);
-		if (crc32 == localCrc32) return true;
+	return ("root" in item) != null;
+}
+
+private bool isItemRemote(const ref JSONValue item)
+{
+	return ("remoteItem" in item) != null;
+}
+
+// construct an Item struct from a JSON driveItem
+private Item makeItem(const ref JSONValue driveItem)
+{
+	Item item = {
+		id: driveItem["id"].str,
+		name: "name" in driveItem ? driveItem["name"].str : null, // name may be missing for deleted files in OneDrive Biz
+		eTag: "eTag" in driveItem ? driveItem["eTag"].str : null, // eTag is not returned for the root in OneDrive Biz
+		cTag: "cTag" in driveItem ? driveItem["cTag"].str : null, // cTag is missing in old files (and all folders in OneDrive Biz)
+		mtime: "fileSystemInfo" in driveItem ? SysTime.fromISOExtString(driveItem["fileSystemInfo"]["lastModifiedDateTime"].str) : SysTime(0),
+	};
+
+	if (isItemFile(driveItem)) {
+		item.type = ItemType.file;
+	} else if (isItemFolder(driveItem)) {
+		item.type = ItemType.dir;
+	} else if (isItemRemote(driveItem)) {
+		item.type = ItemType.remote;
+	} else {
+		// do not throw exception, item will be removed in applyDifferences()
+	}
+
+	// root and remote items do not have parentReference
+	if (!isItemRoot(driveItem) && ("parentReference" in driveItem) != null) {
+		item.driveId = driveItem["parentReference"]["driveId"].str,
+		item.parentId = driveItem["parentReference"]["id"].str;
+	}
+
+	// extract the file hash
+	if (isItemFile(driveItem) && ("hashes" in driveItem["file"])) {
+		if ("crc32Hash" in driveItem["file"]["hashes"]) {
+			item.crc32Hash = driveItem["file"]["hashes"]["crc32Hash"].str;
+		} else if ("sha1Hash" in driveItem["file"]["hashes"]) {
+			item.sha1Hash = driveItem["file"]["hashes"]["sha1Hash"].str;
+		} else if ("quickXorHash" in driveItem["file"]["hashes"]) {
+			item.quickXorHash = driveItem["file"]["hashes"]["quickXorHash"].str;
+		} else {
+			log.vlog("The file does not have any hash");
+		}
+	}
+
+	if (isItemRemote(driveItem)) {
+		item.remoteDriveId = driveItem["remoteItem"]["parentReference"]["driveId"].str;
+		item.remoteId = driveItem["remoteItem"]["id"].str;
+	}
+
+	return item;
+}
+
+private bool testFileHash(string path, const ref Item item)
+{
+	if (item.crc32Hash) {
+		if (item.crc32Hash == computeCrc32(path)) return true;
+	} else if (item.sha1Hash) {
+		if (item.sha1Hash == computeSha1Hash(path)) return true;
+	} else if (item.quickXorHash) {
+		if (item.quickXorHash == computeQuickXorHash(path)) return true;
 	}
 	return false;
 }
 
 class SyncException: Exception
 {
-    @nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable next = null)
+    @nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__)
     {
-        super(msg, file, line, next);
-    }
-
-    @nogc @safe pure nothrow this(string msg, Throwable next, string file = __FILE__, size_t line = __LINE__)
-    {
-        super(msg, file, line, next);
+        super(msg, file, line);
     }
 }
 
@@ -49,34 +109,27 @@ final class SyncEngine
 	private Config cfg;
 	private OneDriveApi onedrive;
 	private ItemDatabase itemdb;
-	private Regex!char skipDir, skipFile;
 	private UploadSession session;
-	// token representing the last status correctly synced
-	private string statusToken;
+	private SelectiveSync selectiveSync;
 	// list of items to skip while applying the changes
 	private string[] skippedItems;
 	// list of items to delete after the changes has been downloaded
-	private string[] pathsToDelete;
+	private string[2][] idsToDelete;
+	// default drive id
+	private string defaultDriveId;
 
-	this(Config cfg, OneDriveApi onedrive, ItemDatabase itemdb)
+	this(Config cfg, OneDriveApi onedrive, ItemDatabase itemdb, SelectiveSync selectiveSync)
 	{
-		assert(onedrive && itemdb);
+		assert(onedrive && itemdb && selectiveSync);
 		this.cfg = cfg;
 		this.onedrive = onedrive;
 		this.itemdb = itemdb;
-		skipDir = wild2regex(cfg.getValue("skip_dir"));
-		skipFile = wild2regex(cfg.getValue("skip_file"));
+		this.selectiveSync = selectiveSync;
 		session = UploadSession(onedrive, cfg.uploadStateFilePath);
 	}
 
 	void init()
 	{
-		// restore the previous status token
-		try {
-			statusToken = readText(cfg.statusTokenFilePath);
-		} catch (FileException e) {
-			// swallow exception
-		}
 		// check if there is an interrupted upload session
 		if (session.restore()) {
 			log.log("Continuing the upload session ...");
@@ -85,59 +138,128 @@ final class SyncEngine
 		}
 	}
 
+	// download all new changes from OneDrive
 	void applyDifferences()
 	{
-		log.vlog("Applying differences ...");
-		try {
-			JSONValue changes;
-			do {
-				changes = onedrive.viewChangesByPath("/", statusToken);
-				foreach (item; changes["value"].array) {
-					applyDifference(item);
+		// root folder
+		string driveId = defaultDriveId = onedrive.getDefaultDrive()["id"].str;
+		string rootId = onedrive.getDefaultRoot["id"].str;
+		applyDifferences(driveId, rootId);
+
+		// check all remote folders
+		// https://github.com/OneDrive/onedrive-api-docs/issues/764
+		Item[] items = itemdb.selectRemoteItems();
+		foreach (item; items) applyDifferences(item.remoteDriveId, item.remoteId);
+	}
+
+
+	// download the new changes of a specific item
+	// id is the root of the drive or a shared folder
+	private void applyDifferences(string driveId, const(char)[] id)
+	{
+		JSONValue changes;
+		string deltaLink = itemdb.getDeltaLink(driveId, id);
+		log.vlog("Applying changes of " ~ id);
+		for (;;) {
+			try {
+				changes = onedrive.viewChangesById(driveId, id, deltaLink);
+			} catch (OneDriveException e) {
+				if (e.httpStatusCode == 410) {
+					log.vlog("Delta link expired, resyncing...");
+					deltaLink = null;
+					continue;
+				} else {
+					throw e;
 				}
-				statusToken = changes["@delta.token"].str;
-				std.file.write(cfg.statusTokenFilePath, statusToken);
-			} while (("@odata.nextLink" in changes.object) !is null);
-		} catch (ErrnoException e) {
-			throw new SyncException(e.msg, e);
-		} catch (FileException e) {
-			throw new SyncException(e.msg, e);
-		} catch (OneDriveException e) {
-			throw new SyncException(e.msg, e);
+			}
+			foreach (item; changes["value"].array) {
+				bool isRoot = (id == item["id"].str); // fix for https://github.com/skilion/onedrive/issues/269
+				applyDifference(item, driveId, isRoot);
+			}
+
+			// the response may contain either @odata.deltaLink or @odata.nextLink
+			if ("@odata.deltaLink" in changes) deltaLink = changes["@odata.deltaLink"].str;
+			if (deltaLink) itemdb.setDeltaLink(driveId, id, deltaLink);
+			if ("@odata.nextLink" in changes) deltaLink = changes["@odata.nextLink"].str;
+			else break;
 		}
-		// delete items in pathsToDelete
-		if (pathsToDelete.length > 0) deleteItems();
+
+		// delete items in idsToDelete
+		if (idsToDelete.length > 0) deleteItems();
 		// empty the skipped items
 		skippedItems.length = 0;
 		assumeSafeAppend(skippedItems);
 	}
 
-	private void applyDifference(JSONValue item)
+	// process the change of a single DriveItem
+	private void applyDifference(JSONValue driveItem, string driveId, bool isRoot)
 	{
-		string id = item["id"].str;
-		string name = item["name"].str;
-		string eTag = item["eTag"].str;
-		string parentId = item["parentReference"]["id"].str;
+		Item item = makeItem(driveItem);
+		log.vlog("Processing ", item.id, " ", item.name);
 
-		// HACK: recognize the root directory
-		if (name == "root" && parentId[$ - 1] == '0' && parentId[$ - 2] == '!') {
-			parentId = null;
-		}
-
-		// skip unwanted items early
-		if (skippedItems.find(parentId).length != 0) {
-			skippedItems ~= id;
+		if (isItemRoot(driveItem) || !item.parentId || isRoot) {
+			log.vlog("Root");
+			item.parentId = null; // ensures that it has no parent
+			item.driveId = driveId; // HACK: makeItem() cannot set the driveId propery of the root
+			itemdb.upsert(item);
 			return;
 		}
 
-		log.vlog(id, " ", name);
+		bool unwanted;
+		unwanted |= skippedItems.find(item.parentId).length != 0;
+		unwanted |= selectiveSync.isNameExcluded(item.name);
+
+		// check the item type
+		if (!unwanted) {
+			if (isItemFile(driveItem)) {
+				log.vlog("File");
+			} else if (isItemFolder(driveItem)) {
+				log.vlog("Folder");
+			} else if (isItemRemote(driveItem)) {
+				log.vlog("Remote item");
+				assert(isItemFolder(driveItem["remoteItem"]), "The remote item is not a folder");
+			} else {
+				log.vlog("The item type is not supported");
+				unwanted = true;
+			}
+		}
+
+		// check for selective sync
+		string path;
+		if (!unwanted) {
+			path = itemdb.computePath(item.driveId, item.parentId) ~ "/" ~ item.name;
+			path = buildNormalizedPath(path);
+			unwanted = selectiveSync.isPathExcluded(path);
+		}
+
+		// skip unwanted items early
+		if (unwanted) {
+			log.vlog("Filtered out");
+			skippedItems ~= item.id;
+			return;
+		}
+
+		// check if the item has been seen before
+		Item oldItem;
+		bool cached = itemdb.selectById(item.driveId, item.id, oldItem);
+
+		// check if the item is going to be deleted
+		if (isItemDeleted(driveItem)) {
+			log.vlog("The item is marked for deletion");
+			if (cached) {
+				// flag to delete
+				idsToDelete ~= [item.driveId, item.id];
+			} else {
+				// flag to ignore
+				skippedItems ~= item.id;
+			}
+			return;
+		}
 
 		// rename the local item if it is unsynced and there is a new version of it
-		Item oldItem;
 		string oldPath;
-		bool cached = itemdb.selectById(id, oldItem);
-		if (cached && eTag != oldItem.eTag) {
-			oldPath = itemdb.computePath(id);
+		if (cached && item.eTag != oldItem.eTag) {
+			oldPath = itemdb.computePath(item.driveId, item.id);
 			if (!isItemSynced(oldItem, oldPath)) {
 				log.vlog("The local item is unsynced, renaming");
 				if (exists(oldPath)) safeRename(oldPath);
@@ -145,133 +267,98 @@ final class SyncEngine
 			}
 		}
 
-		// compute the path of the item
-		string path = ".";
-		if (parentId) {
-			path = itemdb.computePath(parentId) ~ "/" ~ name;
-		}
-
-		ItemType type;
-		if (isItemDeleted(item)) {
-			log.vlog("The item is marked for deletion");
-			if (cached) {
-				itemdb.deleteById(id);
-				pathsToDelete ~= oldPath;
-			}
-			return;
-		} else if (isItemFile(item)) {
-			type = ItemType.file;
-			if (!path.matchFirst(skipFile).empty) {
-				log.vlog("Filtered out");
-				return;
-			}
-		} else if (isItemFolder(item)) {
-			type = ItemType.dir;
-			if (!path.matchFirst(skipDir).empty) {
-				log.vlog("Filtered out");
-				skippedItems ~= id;
-				return;
-			}
+		// update the item
+		if (cached) {
+			applyChangedItem(oldItem, oldPath, item, path);
 		} else {
-			log.vlog("The item is neither a file nor a directory, skipping");
-			skippedItems ~= id;
-			return;
-		}
-
-		string cTag;
-		try {
-			cTag = item["cTag"].str;
-		} catch (JSONException e) {
-			// cTag is not returned if the Item is a folder
-			// https://dev.onedrive.com/resources/item.htm
-			cTag = "";
-		}
-
-		string mtime = item["fileSystemInfo"]["lastModifiedDateTime"].str;
-
-		string crc32;
-		if (type == ItemType.file) {
-			try {
-				crc32 = item["file"]["hashes"]["crc32Hash"].str;
-			} catch (JSONException e) {
-				log.vlog("The hash is not available");
-			}
-		}
-
-		Item newItem = {
-			id: id,
-			name: name,
-			type: type,
-			eTag: eTag,
-			cTag: cTag,
-			mtime: SysTime.fromISOExtString(mtime),
-			parentId: parentId,
-			crc32: crc32
-		};
-
-		if (!cached) {
-			applyNewItem(newItem, path);
-		} else {
-			applyChangedItem(oldItem, newItem, path);
+			applyNewItem(item, path);
 		}
 
 		// save the item in the db
-		if (oldItem.id) {
-			itemdb.update(id, name, type, eTag, cTag, mtime, parentId, crc32);
+		if (cached) {
+			itemdb.update(item);
 		} else {
-			itemdb.insert(id, name, type, eTag, cTag, mtime, parentId, crc32);
+			itemdb.insert(item);
 		}
+
+		// sync remote folder
+		// https://github.com/OneDrive/onedrive-api-docs/issues/764
+		/*if (isItemRemote(driveItem)) {
+			log.log("Syncing remote folder: ", path);
+			applyDifferences(item.remoteDriveId, item.remoteId);
+		}*/
 	}
 
+	// download an item that was not synced before
 	private void applyNewItem(Item item, string path)
 	{
 		if (exists(path)) {
 			if (isItemSynced(item, path)) {
 				log.vlog("The item is already present");
-				// ensure the modified time is correct
-				setTimes(path, item.mtime, item.mtime);
 				return;
 			} else {
-				log.vlog("The local item is out of sync, renaming ...");
+				// TODO: force remote sync by deleting local item
+				log.vlog("The local item is out of sync, renaming...");
 				safeRename(path);
 			}
 		}
 		final switch (item.type) {
 		case ItemType.file:
-			log.log("Downloading: ", path);
-			onedrive.downloadById(item.id, path);
+			downloadFileItem(item, path);
 			break;
 		case ItemType.dir:
-			log.log("Creating directory: ", path);
-			mkdir(path);
+		case ItemType.remote:
+			log.log("Creating directory ", path);
+			mkdirRecurse(path);
 			break;
 		}
-		setTimes(path, item.mtime, item.mtime);
 	}
 
-	private void applyChangedItem(Item oldItem, Item newItem, string newPath)
+	// update a local item
+	// the local item is assumed to be in sync with the local db
+	private void applyChangedItem(Item oldItem, string oldPath, Item newItem, string newPath)
 	{
+		assert(oldItem.driveId == newItem.driveId);
 		assert(oldItem.id == newItem.id);
 		assert(oldItem.type == newItem.type);
+		assert(oldItem.remoteDriveId == newItem.remoteDriveId);
+		assert(oldItem.remoteId == newItem.remoteId);
 
 		if (oldItem.eTag != newItem.eTag) {
-			string oldPath = itemdb.computePath(oldItem.id);
+			// handle changed name/path
 			if (oldPath != newPath) {
-				log.log("Moving: ", oldPath, " -> ", newPath);
+				log.log("Moving ", oldPath, " to ", newPath);
 				if (exists(newPath)) {
-					log.vlog("The destination is occupied, renaming ...");
+					// TODO: force remote sync by deleting local item
+					log.vlog("The destination is occupied, renaming the conflicting file...");
 					safeRename(newPath);
 				}
 				rename(oldPath, newPath);
 			}
-			if (newItem.type == ItemType.file && oldItem.cTag != newItem.cTag) {
-				log.log("Downloading: ", newPath);
-				onedrive.downloadById(newItem.id, newPath);
+			// handle changed content and mtime
+			// HACK: use mtime+hash instead of cTag because of https://github.com/OneDrive/onedrive-api-docs/issues/765
+			if (newItem.type == ItemType.file && oldItem.mtime != newItem.mtime && !testFileHash(newPath, newItem)) {
+				downloadFileItem(newItem, newPath);
+			} else {
+				log.vlog("The item content has not changed");
 			}
-			setTimes(newPath, newItem.mtime, newItem.mtime);
+			// handle changed time
+			if (newItem.type == ItemType.file && oldItem.mtime != newItem.mtime) {
+				setTimes(newPath, newItem.mtime, newItem.mtime);
+			}
 		} else {
 			log.vlog("The item has not changed");
 		}
+	}
+
+	// downloads a File resource
+	private void downloadFileItem(Item item, string path)
+	{
+		assert(item.type == ItemType.file);
+		write("Downloading ", path, "...");
+		onedrive.downloadById(item.driveId, item.id, path);
+		setTimes(path, item.mtime, item.mtime);
+		writeln(" done.");
 	}
 
 	// returns true if the given item corresponds to the local one
@@ -281,15 +368,16 @@ final class SyncEngine
 		final switch (item.type) {
 		case ItemType.file:
 			if (isFile(path)) {
-				SysTime localModifiedTime = timeLastModified(path);
-				import core.time: Duration;
-				item.mtime.fracSecs = Duration.zero; // HACK
+				SysTime localModifiedTime = timeLastModified(path).toUTC();
+				// HACK: reduce time resolution to seconds before comparing
+				item.mtime.fracSecs = Duration.zero;
+				localModifiedTime.fracSecs = Duration.zero;
 				if (localModifiedTime == item.mtime) {
 					return true;
 				} else {
 					log.vlog("The local item has a different modified time ", localModifiedTime, " remote is ", item.mtime);
 				}
-				if (testCrc32(path, item.crc32)) {
+				if (testFileHash(path, item)) {
 					return true;
 				} else {
 					log.vlog("The local item has a different hash");
@@ -299,6 +387,7 @@ final class SyncEngine
 			}
 			break;
 		case ItemType.dir:
+		case ItemType.remote:
 			if (isDir(path)) {
 				return true;
 			} else {
@@ -311,68 +400,80 @@ final class SyncEngine
 
 	private void deleteItems()
 	{
-		log.vlog("Deleting files ...");
-		foreach_reverse (path; pathsToDelete) {
+		foreach_reverse (i; idsToDelete) {
+			Item item;
+			if (!itemdb.selectById(i[0], i[1], item)) continue; // check if the item is in the db
+			string path = itemdb.computePath(i[0], i[1]);
+			log.log("Deleting ", path);
+			itemdb.deleteById(item.driveId, item.id);
+			if (item.remoteDriveId != null) {
+				// delete the linked remote folder
+				itemdb.deleteById(item.remoteDriveId, item.remoteId);
+			}
 			if (exists(path)) {
 				if (isFile(path)) {
 					remove(path);
-					log.log("Deleted file: ", path);
 				} else {
 					try {
-						rmdir(path);
-						log.log("Deleted directory: ", path);
+						if (item.remoteDriveId == null) {
+							rmdir(path);
+						} else {
+							// children of remote items are not enumerated
+							rmdirRecurse(path);
+						}
 					} catch (FileException e) {
-						// directory not empty
+						log.log(e.msg);
 					}
 				}
 			}
 		}
-		pathsToDelete.length = 0;
-		assumeSafeAppend(pathsToDelete);
+		idsToDelete.length = 0;
+		assumeSafeAppend(idsToDelete);
 	}
-
-	// scan the given directory for differences
-	public void scanForDifferences(string path)
+	
+	// scan the given directory for differences and new items
+	void scanForDifferences(string path = ".")
 	{
-		try {
-			log.vlog("Uploading differences ...");
-			Item item;
-			if (itemdb.selectByPath(path, item)) {
-				uploadDifferences(item);
-			}
-			log.vlog("Uploading new items ...");
-			uploadNewItems(path);
-		} catch (ErrnoException e) {
-			throw new SyncException(e.msg, e);
-		} catch (FileException e) {
-			throw new SyncException(e.msg, e);
-		} catch (OneDriveException e) {
-			throw new SyncException(e.msg, e);
+		log.vlog("Uploading differences of ", path);
+		Item item;
+		if (itemdb.selectByPath(path, defaultDriveId, item)) {
+			uploadDifferences(item);
 		}
+		log.vlog("Uploading new items of ", path);
+		uploadNewItems(path);
 	}
 
 	private void uploadDifferences(Item item)
 	{
-		log.vlog(item.id, " ", item.name);
-		string path = itemdb.computePath(item.id);
+		log.vlog("Processing ", item.name);
+
+		string path;
+		bool unwanted = selectiveSync.isNameExcluded(item.name);
+		if (!unwanted) {
+			path = itemdb.computePath(item.driveId, item.id);
+			unwanted = selectiveSync.isPathExcluded(path);
+		}
+
+		// skip unwanted items
+		if (unwanted) {
+			log.vlog("Filtered out");
+			return;
+		}
+
 		if (!isValidName(path)) {
 			log.log("The item: ", path, " is invalid name. It's not uploaded.");
 			return;
 		}
+
 		final switch (item.type) {
 		case ItemType.dir:
-			if (!path.matchFirst(skipDir).empty) {
-				log.vlog("Filtered out");
-				break;
-			}
 			uploadDirDifferences(item, path);
 			break;
 		case ItemType.file:
-			if (!path.matchFirst(skipFile).empty) {
-				log.vlog("Filtered out");
-				break;
-			}
 			uploadFileDifferences(item, path);
+			break;
+		case ItemType.remote:
+			uploadRemoteDirDifferences(item, path);
 			break;
 		}
 	}
@@ -382,15 +483,38 @@ final class SyncEngine
 		assert(item.type == ItemType.dir);
 		if (exists(path)) {
 			if (!isDir(path)) {
-				log.vlog("The item was a directory but now is a file");
+				log.vlog("The item was a directory but now it is a file");
 				uploadDeleteItem(item, path);
 				uploadNewFile(path);
 			} else {
 				log.vlog("The directory has not changed");
 				// loop trough the children
-				foreach (Item child; itemdb.selectChildren(item.id)) {
+				foreach (Item child; itemdb.selectChildren(item.driveId, item.id)) {
 					uploadDifferences(child);
 				}
+			}
+		} else {
+			log.vlog("The directory has been deleted");
+			uploadDeleteItem(item, path);
+		}
+	}
+
+	private void uploadRemoteDirDifferences(Item item, string path)
+	{
+		assert(item.type == ItemType.remote);
+		if (exists(path)) {
+			if (!isDir(path)) {
+				log.vlog("The item was a directory but now it is a file");
+				uploadDeleteItem(item, path);
+				uploadNewFile(path);
+			} else {
+				log.vlog("The directory has not changed");
+				// continue trough the linked folder
+				assert(item.remoteDriveId && item.remoteId);
+				Item remoteItem;
+				bool found = itemdb.selectById(item.remoteDriveId, item.remoteId, remoteItem);
+				assert(found);
+				uploadDifferences(remoteItem);
 			}
 		} else {
 			log.vlog("The directory has been deleted");
@@ -403,30 +527,29 @@ final class SyncEngine
 		assert(item.type == ItemType.file);
 		if (exists(path)) {
 			if (isFile(path)) {
-				SysTime localModifiedTime = timeLastModified(path);
-				import core.time: Duration;
-				item.mtime.fracSecs = Duration.zero; // HACK
+				SysTime localModifiedTime = timeLastModified(path).toUTC();
+				// HACK: reduce time resolution to seconds before comparing
+				item.mtime.fracSecs = Duration.zero;
+				localModifiedTime.fracSecs = Duration.zero;
 				if (localModifiedTime != item.mtime) {
 					log.vlog("The file last modified time has changed");
-					string id = item.id;
 					string eTag = item.eTag;
-					if (!testCrc32(path, item.crc32)) {
+					if (!testFileHash(path, item)) {
 						log.vlog("The file content has changed");
-						log.log("Uploading: ", path);
+						write("Uploading ", path, "...");
 						JSONValue response;
 						if (getSize(path) <= thresholdFileSize) {
-							response = onedrive.simpleUpload(path, path, eTag);
+							response = onedrive.simpleUploadReplace(path, item.driveId, item.id, item.eTag);
+							writeln(" done.");
 						} else {
-							response = session.upload(path, path, eTag);
+							writeln("");
+							response = session.upload(path, item.driveId, item.parentId, baseName(path), eTag);
 						}
-						saveItem(response);
-						id = response["id"].str;
-						/* use the cTag instead of the eTag because Onedrive changes the
-						 * metadata of some type of files (ex. images) AFTER they have been
-						 * uploaded */
+						// saveItem(response); redundant
+						// use the cTag instead of the eTag because Onedrive may update the metadata of files AFTER they have been uploaded
 						eTag = response["cTag"].str;
 					}
-					uploadLastModifiedTime(id, eTag, localModifiedTime.toUTC());
+					uploadLastModifiedTime(item.driveId, item.id, eTag, localModifiedTime.toUTC());
 				} else {
 					log.vlog("The file has not changed");
 				}
@@ -443,147 +566,163 @@ final class SyncEngine
 
 	private void uploadNewItems(string path)
 	{
+		// skip unexisting symbolic links
 		if (isSymlink(path) && !exists(readLink(path))) {
 			return;
 		}
+
 		if (!isValidName(path)) {
 			log.log("The item: ", path, " is invalid name. It's not uploaded.");
 			return;
 		}
+
+		// skip filtered items
+		if (path != ".") {
+			if (selectiveSync.isNameExcluded(baseName(path))) {
+				return;
+			}
+			if (selectiveSync.isPathExcluded(path)) {
+				return;
+			}
+		}
+
 		if (isDir(path)) {
-			if (path.matchFirst(skipDir).empty) {
-				Item item;
-				if (!itemdb.selectByPath(path, item)) {
-					uploadCreateDir(path);
-				}
-				auto entries = dirEntries(path, SpanMode.shallow, false);
-				foreach (DirEntry entry; entries) {
-					uploadNewItems(entry.name);
-				}
+			Item item;
+			if (!itemdb.selectByPath(path, defaultDriveId, item)) {
+				uploadCreateDir(path);
+			}
+			// recursively traverse children
+			auto entries = dirEntries(path, SpanMode.shallow, false);
+			foreach (DirEntry entry; entries) {
+				uploadNewItems(entry.name);
 			}
 		} else {
-			if (path.matchFirst(skipFile).empty) {
-				Item item;
-				if (!itemdb.selectByPath(path, item)) {
-					uploadNewFile(path);
-				}
+			Item item;
+			if (!itemdb.selectByPath(path, defaultDriveId, item)) {
+				uploadNewFile(path);
 			}
 		}
 	}
 
 	private void uploadCreateDir(const(char)[] path)
 	{
-		log.log("Creating remote directory: ", path);
-		JSONValue item = ["name": baseName(path).idup];
-		item["folder"] = parseJSON("{}");
-		auto res = onedrive.createByPath(path.dirName ~ "/", item);
+		log.log("Creating folder ", path);
+		Item parent;
+		enforce(itemdb.selectByPath(dirName(path), defaultDriveId, parent), "The parent item is not in the database");
+		JSONValue driveItem = [
+			"name": JSONValue(baseName(path)),
+			"folder": parseJSON("{}")
+		];
+		auto res = onedrive.createById(parent.driveId, parent.id, driveItem);
 		saveItem(res);
 	}
 
 	private void uploadNewFile(string path)
 	{
-		log.log("Uploading: ", path);
+		write("Uploading file ", path, "...");
+		Item parent;
+		enforce(itemdb.selectByPath(dirName(path), defaultDriveId, parent), "The parent item is not in the database");
 		JSONValue response;
 		if (getSize(path) <= thresholdFileSize) {
-			response = onedrive.simpleUpload(path, path);
+			response = onedrive.simpleUpload(path, parent.driveId, parent.id, baseName(path));
+			writeln(" done.");
 		} else {
-			response = session.upload(path, path);
+			writeln("");
+			response = session.upload(path, parent.driveId, parent.id, baseName(path));
 		}
-		saveItem(response);
 		string id = response["id"].str;
 		string cTag = response["cTag"].str;
 		SysTime mtime = timeLastModified(path).toUTC();
-		/* use the cTag instead of the eTag because Onedrive changes the
-		 * metadata of some type of files (ex. images) AFTER they have been
-		 * uploaded */
-		uploadLastModifiedTime(id, cTag, mtime);
+		// use the cTag instead of the eTag because Onedrive may update the metadata of files AFTER they have been uploaded
+		uploadLastModifiedTime(parent.driveId, id, cTag, mtime);
 	}
 
 	private void uploadDeleteItem(Item item, const(char)[] path)
 	{
-		log.log("Deleting remote item: ", path);
+		log.log("Deleting ", path);
 		try {
-			onedrive.deleteById(item.id, item.eTag);
+			onedrive.deleteById(item.driveId, item.id, item.eTag);
 		} catch (OneDriveException e) {
-			if (e.code == 404) log.log(e.msg);
+			if (e.httpStatusCode == 404) log.log(e.msg);
 			else throw e;
 		}
-		itemdb.deleteById(item.id);
+		itemdb.deleteById(item.driveId, item.id);
+		if (item.remoteId != null) {
+			itemdb.deleteById(item.remoteDriveId, item.remoteId);
+		}
 	}
 
-	private void uploadLastModifiedTime(const(char)[] id, const(char)[] eTag, SysTime mtime)
+	private void uploadLastModifiedTime(const(char)[] driveId, const(char)[] id, const(char)[] eTag, SysTime mtime)
 	{
-		JSONValue mtimeJson = [
+		JSONValue data = [
 			"fileSystemInfo": JSONValue([
 				"lastModifiedDateTime": mtime.toISOExtString()
 			])
 		];
-		auto res = onedrive.updateById(id, mtimeJson, eTag);
-		saveItem(res);
+		auto response = onedrive.updateById(driveId, id, data, eTag);
+		saveItem(response);
 	}
 
-	private void saveItem(JSONValue item)
+	private void saveItem(JSONValue jsonItem)
 	{
-		string id = item["id"].str;
-		ItemType type;
-		if (isItemFile(item)) {
-			type = ItemType.file;
-		} else if (isItemFolder(item)) {
-			type = ItemType.dir;
-		} else {
-			assert(0);
-		}
-		string name = item["name"].str;
-		string eTag = item["eTag"].str;
-		string cTag = item["cTag"].str;
-		string mtime = item["fileSystemInfo"]["lastModifiedDateTime"].str;
-		string parentId = item["parentReference"]["id"].str;
-		string crc32;
-		if (type == ItemType.file) {
-			try {
-				crc32 = item["file"]["hashes"]["crc32Hash"].str;
-			} catch (JSONException e) {
-				// swallow exception
-			}
-		}
-		itemdb.upsert(id, name, type, eTag, cTag, mtime, parentId, crc32);
+		Item item = makeItem(jsonItem);
+		itemdb.upsert(item);
 	}
 
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_move
 	void uploadMoveItem(string from, string to)
 	{
-		log.log("Moving remote item: ", from, " -> ", to);
+		log.log("Moving ", from, " to ", to);
 		Item fromItem, toItem, parentItem;
-		if (!itemdb.selectByPath(from, fromItem)) {
+		if (!itemdb.selectByPath(from, defaultDriveId, fromItem)) {
 			throw new SyncException("Can't move an unsynced item");
 		}
-		if (itemdb.selectByPath(to, toItem)) {
-			// the destination has been overridden
+		if (fromItem.parentId == null) {
+			// the item is a remote folder, need to do the operation on the parent
+			enforce(itemdb.selectByPathNoRemote(from, defaultDriveId, fromItem));
+		}
+		if (itemdb.selectByPath(to, defaultDriveId, toItem)) {
+			// the destination has been overwritten
 			uploadDeleteItem(toItem, to);
 		}
-		if (!itemdb.selectByPath(to.dirName, parentItem)) {
+		if (!itemdb.selectByPath(dirName(to), defaultDriveId, parentItem)) {
 			throw new SyncException("Can't move an item to an unsynced directory");
 		}
-		JSONValue diff = ["name": baseName(to)];
-		diff["parentReference"] = JSONValue([
-			"id": parentItem.id
-		]);
-		auto res = onedrive.updateById(fromItem.id, diff, fromItem.eTag);
-		saveItem(res);
-		string id = res["id"].str;
-		string eTag = res["eTag"].str;
-		uploadLastModifiedTime(id, eTag, timeLastModified(to).toUTC());
+		if (fromItem.driveId != parentItem.driveId) {
+			// items cannot be moved between drives
+			uploadDeleteItem(fromItem, from);
+			uploadNewFile(to);
+		} else {
+			SysTime mtime = timeLastModified(to).toUTC();
+			JSONValue diff = [
+				"name": JSONValue(baseName(to)),
+				"parentReference": JSONValue([
+					"id": parentItem.id
+				]),
+				"fileSystemInfo": JSONValue([
+					"lastModifiedDateTime": mtime.toISOExtString()
+				])
+			];
+			auto res = onedrive.updateById(fromItem.driveId, fromItem.id, diff, fromItem.eTag);
+			// update itemdb
+			saveItem(res);
+		}
 	}
 
 	void deleteByPath(const(char)[] path)
 	{
 		Item item;
-		if (!itemdb.selectByPath(path, item)) {
+		if (!itemdb.selectByPath(path, defaultDriveId, item)) {
 			throw new SyncException("Can't delete an unsynced item");
+		}
+		if (item.parentId == null) {
+			// the item is a remote folder, need to do the operation on the parent
+			enforce(itemdb.selectByPathNoRemote(path, defaultDriveId, item));
 		}
 		try {
 			uploadDeleteItem(item, path);
 		} catch (OneDriveException e) {
-			if (e.code == 404) log.log(e.msg);
+			if (e.httpStatusCode == 404) log.log(e.msg);
 			else throw e;
 		}
 	}

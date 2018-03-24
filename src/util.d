@@ -1,11 +1,14 @@
+import std.base64;
 import std.conv;
-import std.digest.crc;
+import std.digest.crc, std.digest.sha;
 import std.file;
+import std.net.curl;
 import std.path;
 import std.regex;
 import std.socket;
 import std.stdio;
 import std.string;
+import qxor;
 
 private string deviceName;
 
@@ -14,7 +17,7 @@ static this()
 	deviceName = Socket.hostName;
 }
 
-// give a new name to the specified file or directory
+// gives a new name to the specified file or directory
 void safeRename(const(char)[] path)
 {
 	auto ext = extension(path);
@@ -32,13 +35,13 @@ void safeRename(const(char)[] path)
 	rename(path, newPath);
 }
 
-// delete the specified file without throwing an exception if it does not exists
+// deletes the specified file without throwing an exception if it does not exists
 void safeRemove(const(char)[] path)
 {
 	if (exists(path)) remove(path);
 }
 
-// return the crc32 hex string of a file
+// returns the crc32 hex string of a file
 string computeCrc32(string path)
 {
 	CRC32 crc;
@@ -49,12 +52,34 @@ string computeCrc32(string path)
 	return crc.finish().toHexString().dup;
 }
 
-// convert wildcards (*, ?) to regex
+// returns the sha1 hash hex string of a file
+string computeSha1Hash(string path)
+{
+	SHA1 sha;
+	auto file = File(path, "rb");
+	foreach (ubyte[] data; chunks(file, 4096)) {
+		sha.put(data);
+	}
+	return sha.finish().toHexString().dup;
+}
+
+// returns the quickXorHash base64 string of a file
+string computeQuickXorHash(string path)
+{
+	QuickXor qxor;
+	auto file = File(path, "rb");
+	foreach (ubyte[] data; chunks(file, 4096)) {
+		qxor.put(data);
+	}
+	return Base64.encode(qxor.finish());
+}
+
+// converts wildcards (*, ?) to regex
 Regex!char wild2regex(const(char)[] pattern)
 {
 	string str;
 	str.reserve(pattern.length + 2);
-	str ~= "/";
+	str ~= "^";
 	foreach (c; pattern) {
 		switch (c) {
 		case '*':
@@ -67,7 +92,7 @@ Regex!char wild2regex(const(char)[] pattern)
 			str ~= "[^/]";
 			break;
 		case '|':
-			str ~= "$|/";
+			str ~= "$|^";
 			break;
 		default:
 			str ~= c;
@@ -78,16 +103,30 @@ Regex!char wild2regex(const(char)[] pattern)
 	return regex(str, "i");
 }
 
-// return true if the network connection is available
+// returns true if the network connection is available
 bool testNetwork()
 {
-	try {
-		auto addr = new InternetAddress("login.live.com", 443);
-		auto socket = new TcpSocket(addr);
-		return socket.isAlive();
-	} catch (SocketException) {
-		return false;
+	HTTP http = HTTP("https://login.microsoftonline.com");
+	http.method = HTTP.Method.head;
+	return http.perform(ThrowOnError.no) == 0;
+}
+
+// calls globMatch for each string in pattern separated by '|'
+bool multiGlobMatch(const(char)[] path, const(char)[] pattern)
+{
+	foreach (glob; pattern.split('|')) {
+		if (globMatch!(std.path.CaseSensitive.yes)(path, glob)) {
+			return true;
+		}
 	}
+	return false;
+}
+
+unittest
+{
+	assert(multiGlobMatch(".hidden", ".*"));
+	assert(multiGlobMatch(".hidden", "file|.*"));
+	assert(!multiGlobMatch("foo.bar", "foo|bar"));
 }
 
 bool isValidName(string path)
