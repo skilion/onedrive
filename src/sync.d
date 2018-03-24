@@ -460,7 +460,9 @@ final class SyncEngine
 			return;
 		}
 
-		if (!isValidName(path)) {
+		unwanted = !isValidName(path);
+
+		if (unwanted) {
 			log.log("Invalid name, skipping: ", path);
 			return;
 		}
