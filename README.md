@@ -153,3 +153,19 @@ no option        Sync and exit
 ### File naming
 The files and directories in the synchronization directory must follow the [Windows naming conventions](https://msdn.microsoft.com/en-us/library/aa365247).
 The application will crash for example if you have two files with the same name but different case. This is expected behavior and won't be fixed.
+
+### Password change
+If you subsequently change the password to your Microsoft Account, you will have to authorize the client again by logging out. You will then be prompted to authorize the application as you did when you ran it for the first time:
+```sh
+$ onedrive --logout
+Authorize this app visiting:
+
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=etc
+
+Enter the response uri: 
+```
+Open the link in your browser, authorize the app, copy the URI of the blank page into the application, and enter it in the terminal as you did before:
+```sh
+Enter the response uri: https://login.microsoftonline.com/common/oauth2/nativeclient?code=etc
+```
+The application will then sync with OneDrive with the new credentials.
