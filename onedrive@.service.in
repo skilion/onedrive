@@ -4,7 +4,7 @@ Documentation=https://github.com/skilion/onedrive
 After=network.target
 
 [Service]
-ExecStart=@PREFIX@/bin/onedrive -m
+ExecStart=@PREFIX@/bin/onedrive -m --confdir="~/.config/%i"
 Restart=no
 
 [Install]
