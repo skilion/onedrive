@@ -110,6 +110,11 @@ To see the logs run:
 journalctl --user-unit onedrive -f
 ```
 
+If you want to allow your files to sync even when you're not logged in, you need to enable systemd's user linger function:
+```sh
+loginctl enable-linger USERNAME
+```
+
 Note: systemd is supported on Ubuntu only starting from version 15.04
 
 ### Using multiple accounts
@@ -124,6 +129,26 @@ onedrive --monitor --confdir="~/.config/onedriveWork" &
 `--monitor` keeps the application running and monitoring for changes
 
 `&` puts the application in background and leaves the terminal interactive
+
+If you want to do automatic file sync with multiple accounts:
+```sh
+cp -fv /usr/lib/systemd/user/onedrive@.service ~/.config/systemd/user/onedrive@CONFIGDIR
+```
+CONFIGDIR should be replaced with the directory name inside ~/.config where your config is stored
+
+Example:
+```sh
+cp -fv /usr/lib/systemd/user/onedrive@.service ~/.config/systemd/user/onedrive@onedrivePersonal
+cp -fv /usr/lib/systemd/user/onedrive@.service ~/.config/systemd/user/onedrive@onedriveWork
+```
+
+Then, just enable and start the services:
+```sh
+systemctl --user enable onedrive@onedrivePersonal
+systemctl --user enable onedrive@onedriveWork
+systemctl --user start onedrive@onedrivePersonal
+systemctl --user start onedrive@onedriveWork
+```
 
 ## Extra
 

@@ -16,24 +16,27 @@ SOURCES = \
 	src/upload.d \
 	src/util.d
 
-all: onedrive onedrive.service
+all: onedrive onedrive.service onedrive@.service
 
 clean:
-	rm -f onedrive onedrive.o onedrive.service
+	rm -f onedrive onedrive.o onedrive.service onedrive@.service
 
 install: all
 	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
 	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
+	install -D -m 644 onedrive@.service $(DESTDIR)/usr/lib/systemd/user/onedrive@.service
 
 onedrive: version $(SOURCES)
 	$(DC) $(DFLAGS) $(SOURCES)
 
 onedrive.service:
 	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
+	sed "s|@PREFIX@|$(PREFIX)|g" onedrive@.service.in > onedrive@.service
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/onedrive
 	rm -f $(DESTDIR)/usr/lib/systemd/user/onedrive.service
+	rm -f $(DESTDIR)/usr/lib/systemd/user/onedrive@.service
 
 version: .git/HEAD .git/index
 	echo $(shell git describe --tags) >version
