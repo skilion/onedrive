@@ -48,7 +48,22 @@ private bool isPathExcluded(string path, string[] allowedPaths)
 	if (allowedPaths.empty) return false;
 
 	path = buildNormalizedPath(path);
+	string reformatted_allowed;
 	foreach (allowed; allowedPaths) {
+		if (isDir(path)){
+			// so can only use the dir part
+			reformatted_allowed = dirName(allowed);
+		}
+		else{
+			reformatted_allowed = allowed;
+		}
+
+		
+		if (globMatch(path, reformatted_allowed)){
+			// the given path matches wildcard mask
+			return false;
+		} 
+
 		auto comm = commonPrefix(path, allowed);
 		if (comm.length == path.length) {
 			// the given path is contained in an allowed path
