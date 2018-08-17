@@ -1,9 +1,12 @@
 import std.net.curl: CurlException, HTTP;
 import std.datetime, std.exception, std.file, std.json, std.path;
 import std.stdio, std.string, std.uni, std.uri;
+import core.stdc.stdlib;
+import core.thread, std.conv, std.math;
+import progress;
 import config;
 static import log;
-
+shared bool debugResponse = false;
 
 private immutable {
 	string clientId = "22c49a0d-d21c-4792-aed1-8f163c982546";
@@ -49,11 +52,16 @@ final class OneDriveApi
 	// if true, every new access token is printed
 	bool printAccessToken;
 
-	this(Config cfg)
+	this(Config cfg, bool debugHttp)
 	{
 		this.cfg = cfg;
 		http = HTTP();
-		//http.verbose = true;
+		http.dnsTimeout = (dur!"seconds"(5));
+		http.dataTimeout = (dur!"seconds"(3600));
+		if (debugHttp) {
+			http.verbose = true;
+			.debugResponse = true;
+        }
 	}
 
 	bool init()
@@ -111,21 +119,8 @@ final class OneDriveApi
 		return get(url);
 	}
 
-	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delta
-	JSONValue viewChangesByPath(const(char)[] path, const(char)[] deltaLink)
-	{
-		checkAccessTokenExpired();
-		const(char)[] url = deltaLink;
-		if (url == null) {
-			if (path == ".") url = driveUrl ~ "/root/delta";
-			else url = itemByPathUrl ~ encodeComponent(path) ~ ":/delta";
-			url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
-		}
-		return get(url);
-	}
-
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get_content
-	void downloadById(const(char)[] driveId, const(char)[] id, string saveToPath)
+	void downloadById(const(char)[] driveId, const(char)[] id, string saveToPath, long fileSize)
 	{
 		checkAccessTokenExpired();
 		scope(failure) {
@@ -133,7 +128,7 @@ final class OneDriveApi
 		}
 		mkdirRecurse(dirName(saveToPath));
 		const(char)[] url = driveByIdUrl ~ driveId ~ "/items/" ~ id ~ "/content?AVOverride=1";
-		download(url, saveToPath);
+		download(url, saveToPath, fileSize);
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_put_content
@@ -181,17 +176,64 @@ final class OneDriveApi
 	{
 		checkAccessTokenExpired();
 		const(char)[] url = driveByIdUrl ~ parentDriveId ~ "/items/" ~ parentId ~ "/children";
-		http.addRequestHeader("Content-Type", "application/json");
+		http.addRequestHeader("Content-Type", "application/json");		
 		return post(url, item.toString());
 	}
 
+	// Return the details of the specified path
+	JSONValue getPathDetails(const(string) path)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url;
+		//		string itemByPathUrl = "https://graph.microsoft.com/v1.0/me/drive/root:/";
+		if (path == ".") url = driveUrl ~ "/root/";
+		else url = itemByPathUrl ~ encodeComponent(path) ~ ":/";
+		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
+		return get(url);
+	}
+	
+	// Return the details of the specified id
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get
+	JSONValue getPathDetailsById(const(char)[] driveId, const(char)[] id)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url;
+		//		string driveByIdUrl = "https://graph.microsoft.com/v1.0/drives/";
+		url = driveByIdUrl ~ driveId ~ "/items/" ~ id;
+		url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
+		return get(url);
+	}
+	
+	// Return the requested details of the specified id
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get
+	JSONValue getFileSize(const(char)[] driveId, const(char)[] id)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url;
+		//		string driveByIdUrl = "https://graph.microsoft.com/v1.0/drives/";
+		url = driveByIdUrl ~ driveId ~ "/items/" ~ id;
+		url ~= "?select=size";
+		return get(url);
+	}
+	
+	// https://dev.onedrive.com/items/move.htm
+	JSONValue moveByPath(const(char)[] sourcePath, JSONValue moveData)
+	{
+		// Need to use itemByPathUrl
+		checkAccessTokenExpired();
+		string url = itemByPathUrl ~ encodeComponent(sourcePath);
+		http.addRequestHeader("Content-Type", "application/json");
+		return move(url, moveData.toString());
+	}
+	
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_createuploadsession
-	JSONValue createUploadSession(const(char)[] parentDriveId, const(char)[] parentId, const(char)[] filename, const(char)[] eTag = null)
+	JSONValue createUploadSession(const(char)[] parentDriveId, const(char)[] parentId, const(char)[] filename, const(char)[] eTag = null, JSONValue item = null)
 	{
 		checkAccessTokenExpired();
 		const(char)[] url = driveByIdUrl ~ parentDriveId ~ "/items/" ~ parentId ~ ":/" ~ encodeComponent(filename) ~ ":/createUploadSession";
 		if (eTag) http.addRequestHeader("If-Match", eTag);
-		return post(url, null);
+		http.addRequestHeader("Content-Type", "application/json");
+		return post(url, item.toString());
 	}
 
 	// https://dev.onedrive.com/items/upload_large_files.htm
@@ -267,7 +309,6 @@ final class OneDriveApi
 			if (e.httpStatusCode == 400 || e.httpStatusCode == 401) {
 				e.msg ~= "\nRefresh token invalid, use --logout to authorize the client again";
 			}
-			throw e;
 		}
 	}
 
@@ -284,6 +325,9 @@ final class OneDriveApi
 		if (!skipToken) addAccessTokenHeader(); // HACK: requestUploadStatus
 		auto response = perform();
 		checkHttpCode(response);
+		if (.debugResponse){
+			log.vlog("OneDrive Response: ", response);
+        }
 		return response;
 	}
 
@@ -297,8 +341,11 @@ final class OneDriveApi
 		checkHttpCode(response);
 	}
 
-	private void download(const(char)[] url, string filename)
+	private void download(const(char)[] url, string filename, long fileSize)
 	{
+		// Threshold for displaying download bar
+		long thresholdFileSize = 4 * 2^^20; // 4 MiB
+		
 		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.get;
 		http.url = url;
@@ -308,7 +355,43 @@ final class OneDriveApi
 			f.rawWrite(data);
 			return data.length;
 		};
-		http.perform();
+		
+		if (fileSize >= thresholdFileSize){
+			// Download Progress Bar
+			size_t iteration = 20;
+			Progress p = new Progress(iteration);
+			p.title = "Downloading";
+			writeln();
+	
+			real previousDLPercent = -1.0;
+			real percentCheck = 5.0;
+			// Setup progress bar to display
+			http.onProgress = delegate int(size_t dltotal, size_t dlnow, size_t ultotal, size_t ulnow)
+			{
+				// For each onProgress, what is the % of dlnow to dltotal
+				real currentDLPercent = round(double(dlnow)/dltotal*100);
+				// If matching 5% of download, increment progress bar
+				if ((isIdentical(fmod(currentDLPercent, percentCheck), 0.0)) && (previousDLPercent != currentDLPercent)) {
+					p.next();
+					previousDLPercent = currentDLPercent;
+				}
+				return 0;
+			};
+		
+			// Perform download & display progress bar
+			http.perform();
+			writeln();
+			// Reset onProgress to not display anything for next download
+			http.onProgress = delegate int(size_t dltotal, size_t dlnow, size_t ultotal, size_t ulnow)
+			{
+				return 0;
+			};
+		} else {
+			// No progress bar
+			http.perform();
+		}
+		
+		// Check the HTTP response code
 		checkHttpCode();
 	}
 
@@ -334,6 +417,17 @@ final class OneDriveApi
 		return response;
 	}
 
+	private auto move(T)(const(char)[] url, const(T)[] postData)
+	{
+		scope(exit) http.clearRequestHeaders();
+		http.method = HTTP.Method.patch;
+		http.url = url;
+		addAccessTokenHeader();
+		auto response = perform(postData);
+		checkHttpCode();
+		return response;
+	}
+	
 	private JSONValue upload(string filepath, string url)
 	{
 		scope(exit) {
@@ -383,7 +477,15 @@ final class OneDriveApi
 			content ~= data;
 			return data.length;
 		};
-		http.perform();
+		
+		try {
+			http.perform();
+		} catch (CurlException e) {
+			// Potentially Timeout was reached on handle error
+			log.error("\nAccess to the Microsoft OneDrive service timed out - Internet connectivity issue?\n");
+			exit(-1);
+		}
+		
 		JSONValue json;
 		try {
 			json = content.parseJSON();
@@ -397,15 +499,114 @@ final class OneDriveApi
 
 	private void checkHttpCode()
 	{
-		if (http.statusLine.code / 100 != 2) {
-			throw new OneDriveException(http.statusLine.code, http.statusLine.reason);
+		// https://dev.onedrive.com/misc/errors.htm
+		// https://developer.overdrive.com/docs/reference-guide
+		
+		/*
+			Error response handling
+
+			Errors in the OneDrive API are returned using standard HTTP status codes, as well as a JSON error response object. The following HTTP status codes should be expected.
+
+			Status code		Status message						Description
+			
+			200 			OK									Request was handled OK
+			201 			Created								This means you've made a successful POST to checkout, lock in a format, or place a hold
+			204				No Content							This means you've made a successful DELETE to remove a hold or return a title
+			
+			400				Bad Request							Cannot process the request because it is malformed or incorrect.
+			401				Unauthorized						Required authentication information is either missing or not valid for the resource.
+			403				Forbidden							Access is denied to the requested resource. The user might not have enough permission.
+			404				Not Found							The requested resource doesn’t exist.
+			405				Method Not Allowed					The HTTP method in the request is not allowed on the resource.
+			406				Not Acceptable						This service doesn’t support the format requested in the Accept header.
+			409				Conflict							The current state conflicts with what the request expects. For example, the specified parent folder might not exist.
+			410				Gone								The requested resource is no longer available at the server.
+			411				Length Required						A Content-Length header is required on the request.
+			412				Precondition Failed					A precondition provided in the request (such as an if-match header) does not match the resource's current state.
+			413				Request Entity Too Large			The request size exceeds the maximum limit.
+			415				Unsupported Media Type				The content type of the request is a format that is not supported by the service.
+			416				Requested Range Not Satisfiable		The specified byte range is invalid or unavailable.
+			422				Unprocessable Entity				Cannot process the request because it is semantically incorrect.
+			429				Too Many Requests					Client application has been throttled and should not attempt to repeat the request until an amount of time has elapsed.
+			
+			500				Internal Server Error				There was an internal server error while processing the request.
+			501				Not Implemented						The requested feature isn’t implemented.
+			502				Bad Gateway							The service was unreachable
+			503				Service Unavailable					The service is temporarily unavailable. You may repeat the request after a delay. There may be a Retry-After header.
+			507				Insufficient Storage				The maximum storage quota has been reached.
+			509				Bandwidth Limit Exceeded			Your app has been throttled for exceeding the maximum bandwidth cap. Your app can retry the request again after more time has elapsed.
+		
+		*/
+	
+		switch(http.statusLine.code)
+		{
+			//	200 - OK
+			case 200:
+				// No Log .. 
+				break;
+			//	201 - Created OK
+			//  202 - Accepted
+			//	204 - Deleted OK
+			case 201,202,204:
+				// No actions, but log if verbose logging
+				//log.vlog("OneDrive Response: '", http.statusLine.code, " - ", http.statusLine.reason, "'");
+				break;
+			
+			// 400 - Bad Request
+			case 400:
+				// Bad Request .. how should we act?
+				log.vlog("OneDrive returned a 'HTTP 400 - Bad Request' - gracefully handling error");
+				break;	
+			
+			// Item not found
+			case 404:
+				// Item was not found - do not throw an exception
+				log.vlog("OneDrive returned a 'HTTP 404 - Item not found' - gracefully handling error");
+				break;
+			
+			//	409 - Conflict
+			case 409:
+				// Conflict handling .. how should we act? This only really gets triggered if we are using --local-first & we remove items.db as the DB thinks the file is not uploaded but it is
+				log.vlog("OneDrive returned a 'HTTP 409 - Conflict' - gracefully handling error");
+				break;	
+			
+			//	412 - Precondition Failed
+			case 412:
+				// A precondition provided in the request (such as an if-match header) does not match the resource's current state.
+				log.vlog("OneDrive returned a 'HTTP 412 - Precondition Failed' - gracefully handling error");
+				break;	
+			
+			//  415 - Unsupported Media Type
+			case 415:
+				// Unsupported Media Type ... sometimes triggered on image files, especially PNG
+				log.vlog("OneDrive returned a 'HTTP 415 - Unsupported Media Type' - gracefully handling error");
+				break;
+			
+			// Server side (OneDrive) Errors
+			//  500 - Internal Server Error
+			// 	502 - Bad Gateway
+			//	503 - Service Unavailable
+			//  504 - Gateway Timeout (Issue #320)
+			case 500,502,503,504:
+				// No actions
+				log.vlog("OneDrive returned a 'HTTP 5xx Server Side Error' - gracefully handling error");
+				break;	
+
+			// "else"
+			default:
+				throw new OneDriveException(http.statusLine.code, http.statusLine.reason); 
+				break;
 		}
 	}
 
 	private void checkHttpCode(ref const JSONValue response)
 	{
-		if (http.statusLine.code / 100 != 2) {
-			throw new OneDriveException(http.statusLine.code, http.statusLine.reason, response);
+		if (http.statusLine.code == 412) {
+			throw new OneDriveException(http.statusLine.code, http.statusLine.reason);
+		} else {
+			if (http.statusLine.code / 100 != 2) {
+				throw new OneDriveException(http.statusLine.code, http.statusLine.reason, response);
+			}
 		}
 	}
 }
