@@ -2,9 +2,7 @@ import std.datetime;
 import std.exception;
 import std.path;
 import std.string;
-import core.stdc.stdlib;
 import sqlite;
-static import log;
 
 enum ItemType {
 	file,
@@ -31,7 +29,7 @@ struct Item {
 final class ItemDatabase
 {
 	// increment this for every change in the db schema
-	immutable int itemDatabaseVersion = 7;
+	immutable int itemDatabaseVersion = 6;
 
 	Database db;
 	Statement insertItemStmt;
@@ -43,47 +41,8 @@ final class ItemDatabase
 	this(const(char)[] filename)
 	{
 		db = Database(filename);
-		int dbVersion;
-		try {
-			dbVersion = db.getVersion();
-		} catch (SqliteException e) {
-			// An error was generated - what was the error?
-			log.error("\nAn internal database error occurred: " ~ e.msg ~ "\n");
-			exit(-1);
-		}
-		
-		if (dbVersion == 0) {
-			createTable();
-		} else if (db.getVersion() != itemDatabaseVersion) {
-			log.log("The item database is incompatible, re-creating database table structures");
-			db.exec("DROP TABLE item");
-			createTable();
-		}
-		db.exec("PRAGMA foreign_keys = ON");
-		db.exec("PRAGMA recursive_triggers = ON");
-		db.exec("PRAGMA journal_mode = WAL");
-		
-		insertItemStmt = db.prepare("
-			INSERT OR REPLACE INTO item (driveId, id, name, type, eTag, cTag, mtime, parentId, crc32Hash, sha1Hash, quickXorHash, remoteDriveId, remoteId)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-		");
-		updateItemStmt = db.prepare("
-			UPDATE item
-			SET name = ?3, type = ?4, eTag = ?5, cTag = ?6, mtime = ?7, parentId = ?8, crc32Hash = ?9, sha1Hash = ?10, quickXorHash = ?11, remoteDriveId = ?12, remoteId = ?13
-			WHERE driveId = ?1 AND id = ?2
-		");
-		selectItemByIdStmt = db.prepare("
-			SELECT *
-			FROM item
-			WHERE driveId = ?1 AND id = ?2
-		");
-		selectItemByParentIdStmt = db.prepare("SELECT * FROM item WHERE driveId = ? AND parentId = ?");
-		deleteItemByIdStmt = db.prepare("DELETE FROM item WHERE driveId = ? AND id = ?");
-	}
-
-	void createTable()
-	{
-		db.exec("CREATE TABLE item (
+		if (db.getVersion() == 0) {
+			db.exec("CREATE TABLE item (
 				driveId          TEXT NOT NULL,
 				id               TEXT NOT NULL,
 				name             TEXT NOT NULL,
@@ -104,11 +63,32 @@ final class ItemDatabase
 				ON DELETE CASCADE
 				ON UPDATE RESTRICT
 			)");
-		db.exec("CREATE INDEX name_idx ON item (name)");
-		db.exec("CREATE INDEX remote_idx ON item (remoteDriveId, remoteId)");
-		db.setVersion(itemDatabaseVersion);
+			db.exec("CREATE INDEX name_idx ON item (name)");
+			db.exec("CREATE INDEX remote_idx ON item (remoteDriveId, remoteId)");
+			db.setVersion(itemDatabaseVersion);
+		} else if (db.getVersion() != itemDatabaseVersion) {
+			throw new Exception("The item database is incompatible, please resync manually");
+		}
+		db.exec("PRAGMA foreign_keys = ON");
+		db.exec("PRAGMA recursive_triggers = ON");
+		insertItemStmt = db.prepare("
+			INSERT OR REPLACE INTO item (driveId, id, name, type, eTag, cTag, mtime, parentId, crc32Hash, sha1Hash, quickXorHash, remoteDriveId, remoteId)
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+		");
+		updateItemStmt = db.prepare("
+			UPDATE item
+			SET name = ?3, type = ?4, eTag = ?5, cTag = ?6, mtime = ?7, parentId = ?8, crc32Hash = ?9, sha1Hash = ?10, quickXorHash = ?11, remoteDriveId = ?12, remoteId = ?13
+			WHERE driveId = ?1 AND id = ?2
+		");
+		selectItemByIdStmt = db.prepare("
+			SELECT *
+			FROM item
+			WHERE driveId = ?1 AND id = ?2
+		");
+		selectItemByParentIdStmt = db.prepare("SELECT * FROM item WHERE driveId = ? AND parentId = ?");
+		deleteItemByIdStmt = db.prepare("DELETE FROM item WHERE driveId = ? AND id = ?");
 	}
-	
+
 	void insert(const ref Item item)
 	{
 		bindItem(item, insertItemStmt);
@@ -159,18 +139,6 @@ final class ItemDatabase
 		return false;
 	}
 
-	// returns if an item id is in the database
-	bool idInLocalDatabase(const(string) driveId, const(string)id)
-	{
-		selectItemByIdStmt.bind(1, driveId);
-		selectItemByIdStmt.bind(2, id);
-		auto r = selectItemByIdStmt.exec();
-		if (!r.empty) {
-			return true;
-		}
-		return false;
-	}
-	
 	// returns the item with the given path
 	// the path is relative to the sync directory ex: "./Music/Turbo Killer.mp3"
 	bool selectByPath(const(char)[] path, string rootDriveId, out Item item)

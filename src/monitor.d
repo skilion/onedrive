@@ -21,7 +21,6 @@ class MonitorException: ErrnoException
 
 final class Monitor
 {
-	bool verbose;
 	// inotify file descriptor
 	private int fd;
 	// map every inotify watch descriptor to its directory
@@ -30,9 +29,7 @@ final class Monitor
 	private string[int] cookieToPath;
 	// buffer to receive the inotify events
 	private void[] buffer;
-	// skip symbolic links
-	bool skip_symlinks;
-	
+
 	private SelectiveSync selectiveSync;
 
 	void delegate(string path) onDirCreated;
@@ -46,11 +43,8 @@ final class Monitor
 		this.selectiveSync = selectiveSync;
 	}
 
-	void init(Config cfg, bool verbose, bool skip_symlinks)
+	void init(Config cfg)
 	{
-		this.verbose = verbose;
-		this.skip_symlinks = skip_symlinks;
-		
 		assert(onDirCreated && onFileChanged && onDelete && onMove);
 		fd = inotify_init();
 		if (fd < 0) throw new MonitorException("inotify_init failed");
@@ -76,15 +70,6 @@ final class Monitor
 			}
 		}
 
-		// skip symlinks if configured
-		if (isSymlink(dirname)) {
-			// if config says so we skip all symlinked items
-			if (skip_symlinks) {
-				// dont add a watch for this directory
-				return;
-			}
-		}
-		
 		add(dirname);
 		foreach(DirEntry entry; dirEntries(dirname, SpanMode.shallow, false)) {
 			if (entry.isDir) {

@@ -26,18 +26,8 @@ final class Config
 
 	void init()
 	{
-		// Default configuration directory
 		setValue("sync_dir", "~/OneDrive");
-		// Configure to skip ONLY temp files (~*.doc etc) by default
-		// Prior configuration was: .*|~*
-		setValue("skip_file", "~*");
-		// By default symlinks are not skipped (using string type
-		// instead of boolean because hashmap only stores string types)
-		setValue("skip_symlinks", "false");
-		// Configure the monitor mode loop - the number of seconds by which
-		// each sync operation is undertaken when idle under monitor mode
-		setValue("monitor_interval", "45");
-		    
+		setValue("skip_file", ".*|~*");
 		if (!load(userConfigFilePath)) {
 			log.vlog("No config file found, using defaults");
 		}

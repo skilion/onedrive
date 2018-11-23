@@ -27,19 +27,14 @@ final class SelectiveSync
 		this.mask = wild2regex(mask);
 	}
 
-	// config file skip_file parameter
 	bool isNameExcluded(string name)
 	{
-		// Does the file match skip_file config entry?
-		// Returns true if the file matches a skip_file config entry
-		// Returns false if no match
 		return !name.matchFirst(mask).empty;
 	}
 
-	// config sync_list file handling
 	bool isPathExcluded(string path)
 	{
-		return .isPathExcluded(path, paths) || .isPathMatched(path, mask);
+		return .isPathExcluded(path, paths);
 	}
 }
 
@@ -65,24 +60,6 @@ private bool isPathExcluded(string path, string[] allowedPaths)
 		}
 	}
 	return true;
-}
-
-// test if the given path is matched by the regex expression.
-// recursively test up the tree.
-private bool isPathMatched(string path, Regex!char mask) {
-	path = buildNormalizedPath(path);
-	auto paths = pathSplitter(path);
-
-	string prefix = "";
-	foreach(base; paths) {
-		prefix ~= base;
-		if (!path.matchFirst(mask).empty) {
-			// the given path matches something which we should skip
-			return true;
-		}
-		prefix ~= dirSeparator;
-	}
-	return false;
 }
 
 unittest

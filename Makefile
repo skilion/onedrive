@@ -2,12 +2,6 @@ DC = dmd
 DFLAGS = -g -ofonedrive -O -L-lcurl -L-lsqlite3 -L-ldl -J.
 PREFIX = /usr/local
 
-ifneq ("$(wildcard /etc/redhat-release)","")
-RHEL = $(shell cat /etc/redhat-release | grep -E "(Red Hat Enterprise Linux Server|CentOS Linux)" | wc -l)
-else
-RHEL = 0
-endif
-
 SOURCES = \
 	src/config.d \
 	src/itemdb.d \
@@ -20,52 +14,28 @@ SOURCES = \
 	src/sqlite.d \
 	src/sync.d \
 	src/upload.d \
-	src/util.d \
-	src/progress.d
+	src/util.d
 
 all: onedrive onedrive.service
 
 clean:
-	rm -f onedrive onedrive.o onedrive.service onedrive@.service
-
-install: all
-	mkdir -p $(DESTDIR)/var/log/onedrive
-	chown root.users $(DESTDIR)/var/log/onedrive
-	chmod 0775 $(DESTDIR)/var/log/onedrive
-	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
-	install -D -m 644 logrotate/onedrive.logrotate $(DESTDIR)/etc/logrotate.d/onedrive
-ifeq ($(RHEL),1)
-	mkdir -p $(DESTDIR)/usr/lib/systemd/system/
-	chown root.root $(DESTDIR)/usr/lib/systemd/system/
-	chmod 0755 $(DESTDIR)/usr/lib/systemd/system/
-	install -D -m 644 *.service $(DESTDIR)/usr/lib/systemd/system/
-else
-	mkdir -p $(DESTDIR)/usr/lib/systemd/user/
-	chown root.root $(DESTDIR)/usr/lib/systemd/user/
-	chmod 0755 $(DESTDIR)/usr/lib/systemd/user/
-	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/
-	mkdir -p $(DESTDIR)/usr/lib/systemd/system/
-	chown root.root $(DESTDIR)/usr/lib/systemd/system/
-	chmod 0755 $(DESTDIR)/usr/lib/systemd/system/
-	install -D -m 644 onedrive@.service $(DESTDIR)/usr/lib/systemd/system/
-endif
+	rm -f onedrive onedrive.o onedrive.service
 
 onedrive: version $(SOURCES)
 	$(DC) $(DFLAGS) $(SOURCES)
 
+install.noservice: onedrive
+	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
+
+install: all install.noservice
+	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
+
 onedrive.service:
-	sed "s|@PREFIX@|$(PREFIX)|g" systemd.units/onedrive.service.in > onedrive.service
-	sed "s|@PREFIX@|$(PREFIX)|g" systemd.units/onedrive@.service.in > onedrive@.service
+	sed "s|@PREFIX@|$(PREFIX)|g" onedrive.service.in > onedrive.service
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/onedrive
-	rm -f $(DESTDIR)/etc/logrotate.d/onedrive
-ifeq ($(RHEL),1)
-	rm -f $(DESTDIR)/usr/lib/systemd/system/onedrive*.service
-else
 	rm -f $(DESTDIR)/usr/lib/systemd/user/onedrive.service
-	rm -f $(DESTDIR)/usr/lib/systemd/system/onedrive@.service
-endif
 
 version: .git/HEAD .git/index
 	echo $(shell git describe --tags) >version
