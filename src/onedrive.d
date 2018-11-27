@@ -53,6 +53,7 @@ final class OneDriveApi
 	{
 		this.cfg = cfg;
 		http = HTTP();
+		http.maxRedirects(5);
 		//http.verbose = true;
 	}
 
@@ -397,14 +398,14 @@ final class OneDriveApi
 
 	private void checkHttpCode()
 	{
-		if (http.statusLine.code / 100 != 2) {
+		if (http.statusLine.code / 100 != 2 && http.statusLine.code != 302) {
 			throw new OneDriveException(http.statusLine.code, http.statusLine.reason);
 		}
 	}
 
 	private void checkHttpCode(ref const JSONValue response)
 	{
-		if (http.statusLine.code / 100 != 2) {
+		if (http.statusLine.code / 100 != 2 && http.statusLine.code != 302) {
 			throw new OneDriveException(http.statusLine.code, http.statusLine.reason, response);
 		}
 	}
