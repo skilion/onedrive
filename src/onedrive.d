@@ -16,6 +16,19 @@ private immutable {
 	string driveByIdUrl = "https://graph.microsoft.com/v1.0/drives/";
 }
 
+version(unittest)
+{
+	private OneDriveApi buildOneDriveApi()
+	{
+		string configDirName = expandTilde("~/.config/onedrive");
+		auto cfg = new config.Config(configDirName);
+		cfg.init();
+		OneDriveApi onedrive = new OneDriveApi(cfg);
+		onedrive.init();
+		return onedrive;
+	}
+}
+
 class OneDriveException: Exception
 {
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/concepts/errors
@@ -92,11 +105,28 @@ final class OneDriveApi
 		return get(driveUrl);
 	}
 
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		auto drive = onedrive.getDefaultDrive();
+		assert("id" in drive);
+		assert("quota" in drive);
+	}
+
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get
 	JSONValue getDefaultRoot()
 	{
 		checkAccessTokenExpired();
 		return get(driveUrl ~ "/root");
+	}
+
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		auto root = onedrive.getDefaultRoot();
+		assert("id" in root);
+		assert("root" in root);
+		assert("folder" in root);
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delta
@@ -137,14 +167,33 @@ final class OneDriveApi
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_put_content
-	JSONValue simpleUpload(string localPath, string parentDriveId, string parentId, string filename, const(char)[] eTag = null)
+	JSONValue simpleUpload(string localPath, string driveId, string parentId, string filename, const(char)[] eTag = null)
 	{
 		checkAccessTokenExpired();
-		string url = driveByIdUrl ~ parentDriveId ~ "/items/" ~ parentId ~ ":/" ~ encodeComponent(filename) ~ ":/content";
-		// TODO: investigate why this fails for remote folders
-		//if (eTag) http.addRequestHeader("If-Match", eTag);
-		/*else http.addRequestHeader("If-None-Match", "*");*/
+		string url = driveByIdUrl ~ driveId ~ "/items/" ~ parentId ~ ":/" ~ encodeComponent(filename) ~ ":/content";
+		if (eTag) http.addRequestHeader("if-match", eTag);
 		return upload(localPath, url);
+	}
+
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		string driveId = onedrive.getDefaultDrive()["id"].str;
+		string rootId = onedrive.getDefaultRoot["id"].str;
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+
+		std.file.write("/tmp/test", "test");
+		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
+
+		try {
+			onedrive.simpleUpload("/tmp/test", driveId, rootId, "test", "123");
+		} catch (OneDriveException e) {
+			assert(e.httpStatusCode == 412);
+		}
+		onedrive.simpleUpload("/tmp/test", driveId, rootId, "test", item["eTag"].str);
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_put_content
@@ -154,6 +203,27 @@ final class OneDriveApi
 		string url = driveByIdUrl ~ driveId ~ "/items/" ~ id ~ "/content";
 		if (eTag) http.addRequestHeader("If-Match", eTag);
 		return upload(localPath, url);
+	}
+
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		string driveId = onedrive.getDefaultDrive()["id"].str;
+		string rootId = onedrive.getDefaultRoot["id"].str;
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+
+		std.file.write("/tmp/test", "test");
+		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
+
+		try {
+			onedrive.simpleUploadReplace("/tmp/test", driveId, item["id"].str, "123");
+		} catch (OneDriveException e) {
+			assert(e.httpStatusCode == 412);
+		}
+		onedrive.simpleUploadReplace("/tmp/test", driveId, item["id"].str, item["eTag"].str);
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_update
@@ -171,8 +241,37 @@ final class OneDriveApi
 	{
 		checkAccessTokenExpired();
 		const(char)[] url = driveByIdUrl ~ driveId ~ "/items/" ~ id;
-		//TODO: investigate why this always fail with 412 (Precondition Failed)
-		//if (eTag) http.addRequestHeader("If-Match", eTag);
+		if (eTag) http.addRequestHeader("if-match", eTag);
+		del(url);
+	}
+
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		string driveId = onedrive.getDefaultDrive()["id"].str;
+		string rootId = onedrive.getDefaultRoot["id"].str;
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+
+		std.file.write("/tmp/test", "test");
+		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
+
+		try {
+			onedrive.deleteById(driveId, item["id"].str, "123");
+		} catch (OneDriveException e) {
+			assert(e.httpStatusCode == 412);
+		}
+		onedrive.deleteById(driveId, item["id"].str, item["eTag"].str);
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+	}
+
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delete
+	void deleteByPath(const(char)[] driveId, const(char)[] path, const(char)[] eTag = null)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url = driveByIdUrl ~ driveId ~ "/root:/" ~ path;
+		if (eTag) http.addRequestHeader("if-match", eTag);
 		del(url);
 	}
 
@@ -408,38 +507,4 @@ final class OneDriveApi
 			throw new OneDriveException(http.statusLine.code, http.statusLine.reason, response);
 		}
 	}
-}
-
-unittest
-{
-	string configDirName = expandTilde("~/.config/onedrive");
-	auto cfg = new config.Config(configDirName);
-	cfg.init();
-	OneDriveApi onedrive = new OneDriveApi(cfg);
-	onedrive.init();
-	std.file.write("/tmp/test", "test");
-
-	// simpleUpload
-	auto item = onedrive.simpleUpload("/tmp/test", "/test");
-	try {
-		item = onedrive.simpleUpload("/tmp/test", "/test");
-	} catch (OneDriveException e) {
-		assert(e.httpStatusCode == 409);
-	}
-	try {
-		item = onedrive.simpleUpload("/tmp/test", "/test", "123");
-	} catch (OneDriveException e) {
-		assert(e.httpStatusCode == 412);
-	}
-	item = onedrive.simpleUpload("/tmp/test", "/test", item["eTag"].str);
-
-	// deleteById
-	try {
-		onedrive.deleteById(item["id"].str, "123");
-	} catch (OneDriveException e) {
-		assert(e.httpStatusCode == 412);
-	}
-	onedrive.deleteById(item["id"].str, item["eTag"].str);
-
-	onedrive.http.shutdown();
 }
