@@ -22,6 +22,11 @@ final class SelectiveSync
 		}
 	}
 
+	void addPath(string path)
+	{
+		paths ~= buildNormalizedPath(path);
+	}
+
 	void setMask(const(char)[] mask)
 	{
 		this.mask = wild2regex(mask);

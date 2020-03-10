@@ -284,6 +284,38 @@ final class OneDriveApi
 		return post(url, item.toString());
 	}
 
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_post_children
+	JSONValue createFolder(const(char)[] driveId, const(char)[] parentId, const(char)[] name)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url = driveByIdUrl ~ driveId ~ "/items/" ~ parentId ~ "/children";
+		http.addRequestHeader("Content-Type", "application/json");
+		JSONValue item = [
+			"name": JSONValue(name),
+			"folder": JSONValue(cast(int[string]) null)
+		];
+		return post(url, item.toString());
+	}
+
+	unittest
+	{
+		OneDriveApi onedrive = buildOneDriveApi();
+		string driveId = onedrive.getDefaultDrive()["id"].str;
+		string rootId = onedrive.getDefaultRoot["id"].str;
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+
+		onedrive.createFolder(driveId, rootId, "test");
+
+		try {
+			onedrive.createFolder(driveId, rootId, "test");
+		} catch (OneDriveException e) {
+			assert(e.httpStatusCode == 409);
+		}
+
+		collectException(onedrive.deleteByPath(driveId, "test"));
+	}
+
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_createuploadsession
 	JSONValue createUploadSession(const(char)[] parentDriveId, const(char)[] parentId, const(char)[] filename, const(char)[] eTag = null)
 	{
