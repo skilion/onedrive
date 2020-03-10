@@ -86,6 +86,11 @@ private Item makeItem(const ref JSONValue driveItem)
 	return item;
 }
 
+private bool hasHash(const ref Item item)
+{
+	return item.crc32Hash || item.sha1Hash || item.quickXorHash;
+}
+
 private bool testFileHash(string path, const ref Item item)
 {
 	if (item.crc32Hash) {
@@ -370,19 +375,22 @@ final class SyncEngine
 		final switch (item.type) {
 		case ItemType.file:
 			if (isFile(path)) {
-				SysTime localModifiedTime = timeLastModified(path).toUTC();
-				// HACK: reduce time resolution to seconds before comparing
-				item.mtime.fracSecs = Duration.zero;
-				localModifiedTime.fracSecs = Duration.zero;
-				if (localModifiedTime == item.mtime) {
-					return true;
+				if (hasHash(item)) {
+					if (testFileHash(path, item)) {
+						return true;
+					} else {
+						log.vlog("The local item has a different hash");
+					}
 				} else {
-					log.vlog("The local item has a different modified time ", localModifiedTime, " remote is ", item.mtime);
-				}
-				if (testFileHash(path, item)) {
-					return true;
-				} else {
-					log.vlog("The local item has a different hash");
+					SysTime localModifiedTime = timeLastModified(path).toUTC();
+					// HACK: reduce time resolution to seconds before comparing
+					item.mtime.fracSecs = Duration.zero;
+					localModifiedTime.fracSecs = Duration.zero;
+					if (localModifiedTime == item.mtime) {
+						return true;
+					} else {
+						log.vlog("The local item has a different modified time ", localModifiedTime, " remote is ", item.mtime);
+					}
 				}
 			} else {
 				log.vlog("The local item is a directory but should be a file");
@@ -432,7 +440,7 @@ final class SyncEngine
 		idsToDelete.length = 0;
 		assumeSafeAppend(idsToDelete);
 	}
-	
+
 	// scan the given directory for differences and new items
 	void scanForDifferences(string path = ".")
 	{
