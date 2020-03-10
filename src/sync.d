@@ -342,9 +342,8 @@ final class SyncEngine
 				}
 				rename(oldPath, newPath);
 			}
-			// handle changed content and mtime
-			// HACK: use mtime+hash instead of cTag because of https://github.com/OneDrive/onedrive-api-docs/issues/765
-			if (newItem.type == ItemType.file && oldItem.mtime != newItem.mtime && !testFileHash(newPath, newItem)) {
+			// handle changed content
+			if (oldItem.cTag != newItem.cTag) {
 				downloadFileItem(newItem, newPath);
 			} else {
 				log.vlog("The item content has not changed");
