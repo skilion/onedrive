@@ -14,11 +14,6 @@
 
 ## Setup
 
-### Dependencies
-* [libcurl](http://curl.haxx.se/libcurl/)
-* [SQLite 3](https://www.sqlite.org/)
-* [Digital Mars D Compiler (DMD)](http://dlang.org/download.html)
-
 ### Dependencies: Ubuntu/Debian
 ```sh
 sudo apt install libcurl4-openssl-dev
@@ -44,6 +39,11 @@ curl -fsS https://dlang.org/install.sh | bash -s dmd
 ```sh
 sudo pacman -S curl sqlite dlang
 ```
+
+### Dependencies
+* [libcurl](http://curl.haxx.se/libcurl/)
+* [SQLite 3](https://www.sqlite.org/)
+* [Digital Mars D Compiler (DMD)](http://dlang.org/download.html)
 
 ### Installation
 ```sh
