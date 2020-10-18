@@ -4,7 +4,7 @@ static import log;
 
 private long fragmentSize = 10 * 2^^20; // 10 MiB
 
-struct UploadSession
+final class UploadSession
 {
 	private OneDriveApi onedrive;
 	private bool verbose;
