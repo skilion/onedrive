@@ -34,7 +34,10 @@ final class SelectiveSync
 
 	bool isNameExcluded(string name)
 	{
-		return !name.matchFirst(mask).empty;
+		// always allow the root
+		if (name == ".") return false;
+		
+		return !mask.empty && !name.matchFirst(mask).empty;
 	}
 
 	bool isPathExcluded(string path)
