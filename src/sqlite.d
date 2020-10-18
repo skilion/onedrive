@@ -139,9 +139,9 @@ struct Statement
 				// https://www.sqlite.org/c3ref/data_count.html
 				int count = sqlite3_data_count(pStmt);
 				row = new const(char)[][count];
-				foreach (int i, ref column; row) {
+				foreach (i, ref column; row) {
 					// https://www.sqlite.org/c3ref/column_blob.html
-					column = fromStringz(sqlite3_column_text(pStmt, i));
+					column = fromStringz(sqlite3_column_text(pStmt, cast(int) i));
 				}
 			} else {
 				throw new SqliteException(ifromStringz(sqlite3_errmsg(sqlite3_db_handle(pStmt))));
