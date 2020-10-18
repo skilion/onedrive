@@ -186,9 +186,18 @@ final class ItemDatabase
 
 	void deleteById(const(char)[] driveId, const(char)[] id)
 	{
-		deleteItemByIdStmt.bind(1, driveId);
-		deleteItemByIdStmt.bind(2, id);
-		deleteItemByIdStmt.exec();
+		Item item;
+		if (selectById(driveId, id, item))
+		{
+			deleteItemByIdStmt.bind(1, driveId);
+			deleteItemByIdStmt.bind(2, id);
+			deleteItemByIdStmt.exec();
+			if (item.type == ItemType.remote) {
+				deleteItemByIdStmt.bind(1, item.remoteDriveId);
+				deleteItemByIdStmt.bind(2, item.remoteId);
+				deleteItemByIdStmt.exec();
+			}
+		}
 	}
 
 	private void bindItem(const ref Item item, ref Statement stmt)
