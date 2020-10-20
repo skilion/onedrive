@@ -262,11 +262,10 @@ final class ChangesDownloader
 				return;
 			}
 
-			// rename the local item if it is unsynced
-			if (!isItemSyncedQuick(oldItem, oldPath)) {
-				log.vlog("The local item is unsynced, renaming");
-				if (exists(oldPath)) safeRename(oldPath);
-				cached = false;
+			if (isItemSyncedQuick(oldItem, oldPath)) {
+				updateLocalItem(oldItem, oldPath, item, path);
+				itemdb.update(item);
+				return;
 			}
 
 			if (exists(oldPath)) {
@@ -291,27 +290,39 @@ final class ChangesDownloader
 		assert(oldItem.remoteId == newItem.remoteId);
 		assert(oldItem.eTag != newItem.eTag);
 
-		// handle changed name/path
-		if (oldPath != newPath) {
-			log.log("Moving ", oldPath, " to ", newPath);
-			if (exists(newPath)) {
-				log.vlog("The destination is occupied, renaming the conflicting file...");
-				safeRename(newPath);
+		if (newItem.type == ItemType.file) {
+			if (oldPath != newPath) {
+				moveFile(oldPath, newPath);
 			}
-			rename(oldPath, newPath);
-		}
 
-		// handle changed content
-		if (oldItem.cTag != newItem.cTag) {
-			downloadItemContent(newItem, newPath);
-		} else {
-			log.vlog("The item content has not changed");
-		}
+			// handle changed content
+			if (oldItem.cTag != newItem.cTag) {
+				downloadItemContent(newItem, newPath);
+			} else {
+				log.vlog("The file content has not changed");
+			}
 
-		// handle changed time
-		if (newItem.type == ItemType.file && oldItem.mtime != newItem.mtime) {
-			setTimes(newPath, newItem.mtime, newItem.mtime);
+			// handle changed time
+			if (oldItem.mtime != newItem.mtime) {
+				setTimes(newPath, newItem.mtime, newItem.mtime);
+			}
+		} else if (newItem.type == ItemType.dir || newItem.type == ItemType.remote) {
+			if (oldPath != newPath) {
+				moveFile(oldPath, newPath);
+			} else {
+				log.vlog("The folder has not changed");
+			}
 		}
+	}
+
+	private void moveFile(string oldPath, string newPath)
+	{
+		log.log("Moving ", oldPath, " to ", newPath);
+		if (exists(newPath)) {
+			log.vlog("The destination is occupied, renaming the conflicting file...");
+			safeRename(newPath);
+		}
+		rename(oldPath, newPath);
 	}
 	
 	private void downloadNewItem(Item item, string path)
