@@ -125,39 +125,47 @@ int main(string[] args)
 		Monitor m = new Monitor(selectiveSync);
 		m.onDirCreated = delegate(string path) {
 			log.vlog("[M] Directory created: ", path);
+			if (!online) return;
 			try {
 				sync.scanForDifferences(path);
+				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
 		m.onFileChanged = delegate(string path) {
 			log.vlog("[M] File changed: ", path);
+			if (!online) return;
 			try {
 				sync.scanForDifferences(path);
+				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
 		m.onDelete = delegate(string path) {
 			log.vlog("[M] Item deleted: ", path);
+			if (!online) return;
 			try {
 				sync.deleteByPath(path);
+				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
 		m.onMove = delegate(string from, string to) {
+			if (!online) return;
 			log.vlog("[M] Item moved: ", from, " -> ", to);
 			try {
 				sync.uploadMoveItem(from, to);
+				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
 		};
 		if (!downloadOnly) m.init(cfg);
 		// monitor loop
-		immutable auto checkInterval = dur!"seconds"(45);
+		immutable auto checkInterval = dur!"seconds"(300);
 		auto lastCheckTime = MonoTime.currTime();
 		while (true) {
 			if (!downloadOnly) m.update(online);
@@ -174,7 +182,7 @@ int main(string[] args)
 				}
 				GC.collect();
 			}
-			Thread.sleep(dur!"msecs"(500));
+			Thread.sleep(dur!"seconds"(1));
 		}
 	}
 
