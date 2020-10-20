@@ -37,48 +37,38 @@ private bool isItemRemote(const ref JSONValue item)
 }
 
 // construct an Item struct from a JSON driveItem
-private Item makeItem(const ref JSONValue driveItem)
+private Item makeItem(const ref JSONValue driveItem, string driveId, bool isRoot)
 {
 	Item item = {
 		id: driveItem["id"].str,
+		driveId: driveId,
 		name: "name" in driveItem ? driveItem["name"].str : null, // name may be missing for deleted files in OneDrive Biz
 		eTag: "eTag" in driveItem ? driveItem["eTag"].str : null, // eTag is not returned for the root in OneDrive Biz
 		cTag: "cTag" in driveItem ? driveItem["cTag"].str : null, // cTag is missing in old files (and all folders in OneDrive Biz)
 		mtime: "fileSystemInfo" in driveItem && "lastModifiedDateTime" in driveItem["fileSystemInfo"] ?
 			SysTime.fromISOExtString(driveItem["fileSystemInfo"]["lastModifiedDateTime"].str) :
 			SysTime(0),
+		parentId: isRoot ? null : driveItem["parentReference"]["id"].str
 	};
 
 	if (isItemFile(driveItem)) {
 		item.type = ItemType.file;
+
+		if ("hashes" in driveItem["file"]) {
+			if ("crc32Hash" in driveItem["file"]["hashes"]) {
+				item.crc32Hash = driveItem["file"]["hashes"]["crc32Hash"].str;
+			} else if ("sha1Hash" in driveItem["file"]["hashes"]) {
+				item.sha1Hash = driveItem["file"]["hashes"]["sha1Hash"].str;
+			} else if ("quickXorHash" in driveItem["file"]["hashes"]) {
+				item.quickXorHash = driveItem["file"]["hashes"]["quickXorHash"].str;
+			} else {
+				log.vlog("The file does not have any hash");
+			}
+		}
 	} else if (isItemFolder(driveItem)) {
 		item.type = ItemType.dir;
 	} else if (isItemRemote(driveItem)) {
 		item.type = ItemType.remote;
-	} else {
-		// do not throw exception, item will be removed in applyDifferences()
-	}
-
-	// root and remote items do not have parentReference
-	if (!isItemRoot(driveItem) && ("parentReference" in driveItem) != null) {
-		item.driveId = driveItem["parentReference"]["driveId"].str,
-		item.parentId = driveItem["parentReference"]["id"].str;
-	}
-
-	// extract the file hash
-	if (isItemFile(driveItem) && ("hashes" in driveItem["file"])) {
-		if ("crc32Hash" in driveItem["file"]["hashes"]) {
-			item.crc32Hash = driveItem["file"]["hashes"]["crc32Hash"].str;
-		} else if ("sha1Hash" in driveItem["file"]["hashes"]) {
-			item.sha1Hash = driveItem["file"]["hashes"]["sha1Hash"].str;
-		} else if ("quickXorHash" in driveItem["file"]["hashes"]) {
-			item.quickXorHash = driveItem["file"]["hashes"]["quickXorHash"].str;
-		} else {
-			log.vlog("The file does not have any hash");
-		}
-	}
-
-	if (isItemRemote(driveItem)) {
 		item.remoteDriveId = driveItem["remoteItem"]["parentReference"]["driveId"].str;
 		item.remoteId = driveItem["remoteItem"]["id"].str;
 	}
@@ -141,13 +131,13 @@ final class ChangesDownloader
 		foreach (item; items) downloadAndApplyChanges(item.remoteDriveId, item.remoteId);
 	}
 
-	private void downloadAndApplyChanges(const(char)[] driveId, const(char)[] itemId)
+	private void downloadAndApplyChanges(string driveId, const(char)[] itemId)
 	{
 		writeln("Downloading changes of " ~ itemId);
 
 		string nextLink = itemdb.getDeltaLink(driveId, itemId);
 		do {
-			JSONValue changes = downloadChanges(driveId, itemId, nextLink);
+			JSONValue changes = downloadChanges(driveId, itemId.dup, nextLink);
 			applyAllChanges(changes, driveId, itemId);
 
 			if ("@odata.deltaLink" in changes) {
@@ -174,7 +164,7 @@ final class ChangesDownloader
 			changes = onedrive.viewChangesById(driveId, itemId, nextLink);
 		} catch (OneDriveException e) {
 			if (e.httpStatusCode == 410) {
-				writeln("Delta link expired, resyncing...");
+				log.log("Delta link expired, resyncing...");
 				return downloadChanges(driveId, itemId, null);
 			}
 			throw e;
@@ -182,7 +172,7 @@ final class ChangesDownloader
 		return changes;
 	}
 	
-	private void applyAllChanges(const ref JSONValue changes, const(char)[] driveId, const(char)[] rootId)
+	private void applyAllChanges(const ref JSONValue changes, string driveId, const(char)[] rootId)
 	{
 		foreach (item; changes["value"].array) {
 			bool isRoot = (rootId == item["id"].str); // fix for https://github.com/skilion/onedrive/issues/269
@@ -190,15 +180,13 @@ final class ChangesDownloader
 		}
 	}
 
-	private void applyChange(JSONValue driveItem, const(char)[] driveId, bool isRoot)
+	private void applyChange(JSONValue driveItem, string driveId, bool isRoot)
 	{
-		Item item = makeItem(driveItem);
-		writeln("Processing ", item.id, " ", item.name);
+		Item item = makeItem(driveItem, driveId, isRoot);
+		log.log("Processing ", item.id, " ", item.name);
 
-		if (isItemRoot(driveItem) || !item.parentId || isRoot) {
-			writeln("Root");
-			item.parentId = null; // ensures that it has no parent
-			item.driveId = driveId.dup; // HACK: makeItem() cannot set the driveId propery of the root
+		if (isRoot) {
+			log.log("Root");
 			itemdb.upsert(item);
 			return;
 		}
@@ -627,7 +615,7 @@ final class ChangesUploader
 			"folder": parseJSON("{}")
 		];
 		auto res = onedrive.createById(parent.driveId, parent.id, driveItem);
-		saveItem(res);
+		saveItem(res, parent.driveId);
 	}
 
 	void uploadNewFile(string path)
@@ -665,7 +653,7 @@ final class ChangesUploader
 		}
 	}
 
-	private void setLastModifiedTime(const(char)[] driveId, const(char)[] id, const(char)[] eTag, SysTime mtime)
+	private void setLastModifiedTime(string driveId, const(char)[] id, const(char)[] eTag, SysTime mtime)
 	{
 		JSONValue data = [
 			"fileSystemInfo": JSONValue([
@@ -673,12 +661,12 @@ final class ChangesUploader
 			])
 		];
 		auto response = onedrive.updateById(driveId, id, data, eTag);
-		saveItem(response);
+		saveItem(response, driveId);
 	}
 
-	private void saveItem(JSONValue jsonItem)
+	void saveItem(JSONValue jsonItem, string driveId)
 	{
-		Item item = makeItem(jsonItem);
+		Item item = makeItem(jsonItem, driveId, false);
 		itemdb.upsert(item);
 	}
 }
@@ -714,7 +702,7 @@ final class SyncEngine
 		if (uploadSession.restore()) {
 			log.log("Continuing the upload session ...");
 			auto item = uploadSession.upload();
-			saveItem(item);
+			changesUploader.saveItem(item, item["parentReference"]["id"].str);
 		}
 	}
 
@@ -766,7 +754,7 @@ final class SyncEngine
 			];
 			auto res = onedrive.updateById(fromItem.driveId, fromItem.id, diff, fromItem.eTag);
 			// update itemdb
-			saveItem(res);
+			changesUploader.saveItem(res, parentItem.driveId);
 		}
 	}
 
@@ -786,11 +774,5 @@ final class SyncEngine
 			if (e.httpStatusCode == 404) log.log(e.msg);
 			else throw e;
 		}
-	}
-
-	private void saveItem(JSONValue jsonItem)
-	{
-		Item item = makeItem(jsonItem);
-		itemdb.upsert(item);
 	}
 }
