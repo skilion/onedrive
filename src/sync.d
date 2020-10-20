@@ -201,7 +201,7 @@ final class ChangesDownloader
 			} else if (isItemFolder(driveItem)) {
 				log.vlog("Folder");
 			} else if (isItemRemote(driveItem)) {
-				log.vlog("Remote item");
+				log.vlog("Shared folder");
 				assert(isItemFolder(driveItem["remoteItem"]), "The remote item is not a folder");
 			} else {
 				log.vlog("The item type is not supported");
@@ -238,8 +238,12 @@ final class ChangesDownloader
 			log.vlog("The item is marked for deletion");
 			if (cached) {
 				if (!isItemSyncedQuick(oldItem, oldPath)) {
-					log.vlog("The local item is unsynced, renaming");
-					if (exists(oldPath)) safeRename(oldPath);
+					if (exists(oldPath)) {
+						log.vlog("The local item is unsynced, renaming");
+						safeRename(oldPath);
+					} else {
+						log.vlog("The local item has already been deleted");
+					}
 				} else {
 					// flag to delete
 					idsToDelete ~= [item.driveId, item.id];
@@ -265,8 +269,12 @@ final class ChangesDownloader
 				cached = false;
 			}
 
-			updateLocalItem(oldItem, oldPath, item, path);
-			itemdb.update(item);
+			if (exists(oldPath)) {
+				log.vlog("The local item is unsynced, renaming");
+				safeRename(oldPath);
+			} else {
+				log.vlog("The local item has been deleted");
+			}
 		}
 
 		// download the item
