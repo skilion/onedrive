@@ -748,7 +748,7 @@ final class SyncEngine
 		if (fromItem.driveId != parentItem.driveId) {
 			// items cannot be moved between drives, copy it instead
 			changesUploader.deleteItem(fromItem, from);
-			changesUploader.uploadNewFile(to);
+			changesUploader.uploadNewItems(to);
 		} else {
 			SysTime mtime = timeLastModified(to).toUTC();
 			JSONValue diff = [
