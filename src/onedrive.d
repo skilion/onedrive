@@ -275,6 +275,13 @@ final class OneDriveApi
 		del(url);
 	}
 
+	void deleteByPath(const(char)[] path)
+	{
+		checkAccessTokenExpired();
+		auto url = itemByPathUrl ~ encodeComponent(path);
+		del(url);
+	}
+
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_post_children
 	JSONValue createById(const(char)[] parentDriveId, const(char)[] parentId, JSONValue item)
 	{
