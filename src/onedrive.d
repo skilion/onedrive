@@ -181,7 +181,7 @@ final class OneDriveApi
 		string driveId = onedrive.getDefaultDrive()["id"].str;
 		string rootId = onedrive.getDefaultRoot["id"].str;
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 
 		std.file.write("/tmp/test", "test");
 		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
@@ -193,7 +193,7 @@ final class OneDriveApi
 		}
 		onedrive.simpleUpload("/tmp/test", driveId, rootId, "test", item["eTag"].str);
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_put_content
@@ -211,7 +211,7 @@ final class OneDriveApi
 		string driveId = onedrive.getDefaultDrive()["id"].str;
 		string rootId = onedrive.getDefaultRoot["id"].str;
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 
 		std.file.write("/tmp/test", "test");
 		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
@@ -223,7 +223,7 @@ final class OneDriveApi
 		}
 		onedrive.simpleUploadReplace("/tmp/test", driveId, item["id"].str, item["eTag"].str);
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_update
@@ -251,7 +251,7 @@ final class OneDriveApi
 		string driveId = onedrive.getDefaultDrive()["id"].str;
 		string rootId = onedrive.getDefaultRoot["id"].str;
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 
 		std.file.write("/tmp/test", "test");
 		auto item = onedrive.simpleUpload("/tmp/test", driveId, rootId, "test");
@@ -263,16 +263,7 @@ final class OneDriveApi
 		}
 		onedrive.deleteById(driveId, item["id"].str, item["eTag"].str);
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
-	}
-
-	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delete
-	void deleteByPath(const(char)[] driveId, const(char)[] path, const(char)[] eTag = null)
-	{
-		checkAccessTokenExpired();
-		const(char)[] url = driveByIdUrl ~ driveId ~ "/root:/" ~ path;
-		if (eTag) http.addRequestHeader("if-match", eTag);
-		del(url);
+		collectException(onedrive.deleteByPath("test"));
 	}
 
 	void deleteByPath(const(char)[] path)
@@ -310,7 +301,7 @@ final class OneDriveApi
 		string driveId = onedrive.getDefaultDrive()["id"].str;
 		string rootId = onedrive.getDefaultRoot["id"].str;
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 
 		onedrive.createFolder(driveId, rootId, "test");
 
@@ -320,7 +311,7 @@ final class OneDriveApi
 			assert(e.httpStatusCode == 409);
 		}
 
-		collectException(onedrive.deleteByPath(driveId, "test"));
+		collectException(onedrive.deleteByPath("test"));
 	}
 
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_createuploadsession
