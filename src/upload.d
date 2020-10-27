@@ -1,4 +1,10 @@
-import std.algorithm, std.conv, std.datetime, std.file, std.json;
+import core.thread;
+import std.algorithm;
+import std.conv;
+import std.datetime;
+import std.file;
+import std.json;
+import std.net.curl;
 import onedrive;
 static import log;
 
@@ -51,12 +57,8 @@ final class UploadSession
 			try {
 				response = onedrive.requestUploadStatus(session["uploadUrl"].str);
 			} catch (OneDriveException e) {
-				if (e.httpStatusCode == 400) {
-					log.vlog("Upload session not found");
-					return false;
-				} else {
-					throw e;
-				}
+				log.vlog("Upload session not found");
+				return false;
 			}
 			session["expirationDateTime"] = response["expirationDateTime"];
 			session["nextExpectedRanges"] = response["nextExpectedRanges"];
@@ -77,9 +79,7 @@ final class UploadSession
 		while (true) {
 			long fragSize = fragmentSize < fileSize - offset ? fragmentSize : fileSize - offset;
 			log.vlog("Uploading fragment: ", offset, "-", offset + fragSize, "/", fileSize);
-			response = onedrive.uploadFragment(
-				session["uploadUrl"].str,
-				session["localPath"].str,
+			response = uploadFragment(
 				offset,
 				fragSize,
 				fileSize
@@ -93,6 +93,33 @@ final class UploadSession
 		}
 		// upload complete
 		remove(sessionFilePath);
+		return response;
+	}
+
+	private JSONValue uploadFragment(long offset, long fragmentSize, long fileSize)
+	{
+		int retries;
+		JSONValue response;
+
+		do {
+			try {
+				response = onedrive.uploadFragment(
+					session["uploadUrl"].str,
+					session["localPath"].str,
+					offset,
+					fragmentSize,
+					fileSize
+				);
+			} catch (OneDriveException e) {
+				if (++retries > 3) throw e;
+				else log.log(e.msg);
+				Thread.sleep(dur!("seconds")(2 ^^ retries));
+			} catch (CurlTimeoutException e) {
+				log.error("Timeout while uploading fragment, retrying in 1 minute");
+				Thread.sleep(dur!("minutes")(1));
+			}
+		} while (response.isNull());
+
 		return response;
 	}
 
