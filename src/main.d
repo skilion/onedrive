@@ -9,6 +9,11 @@ bool downloadOnly;
 
 int main(string[] args)
 {
+	version(unittest)
+	{
+		return 0;
+	}
+	
 	// configuration directory
 	string configDirName = environment.get("XDG_CONFIG_HOME", "~/.config") ~ "/onedrive";
 	// override the sync directory

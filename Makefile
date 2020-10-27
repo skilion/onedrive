@@ -21,6 +21,9 @@ all: onedrive onedrive.service
 clean:
 	rm -f onedrive onedrive.o onedrive.service
 
+unittest: version $(SOURCES)
+	$(DC) $(DFLAGS) -unittest $(SOURCES)
+
 install: all
 	install -D onedrive $(DESTDIR)$(PREFIX)/bin/onedrive
 	install -D -m 644 onedrive.service $(DESTDIR)/usr/lib/systemd/user/onedrive.service
