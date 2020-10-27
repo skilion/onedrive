@@ -320,8 +320,6 @@ final class OneDriveApi
 		}
 		http.method = HTTP.Method.put;
 		http.url = uploadUrl;
-		// when using microsoft graph the auth code is different
-		//addAccessTokenHeader();
 		import std.conv;
 		string contentRange = "bytes " ~ to!string(offset) ~ "-" ~ to!string(offset + offsetSize - 1) ~ "/" ~ to!string(fileSize);
 		http.addRequestHeader("Content-Range", contentRange);
@@ -330,7 +328,6 @@ final class OneDriveApi
 		http.onSend = data => file.rawRead(data).length;
 		http.contentLength = offsetSize;
 		auto response = perform();
-		// TODO: retry on 5xx errors
 		checkHttpCode();
 		return response;
 	}
@@ -339,8 +336,7 @@ final class OneDriveApi
 	JSONValue requestUploadStatus(const(char)[] uploadUrl)
 	{
 		checkAccessTokenExpired();
-		// when using microsoft graph the auth code is different
-		return get(uploadUrl, true);
+		return get(uploadUrl);
 	}
 
 	private void redeemToken(const(char)[] authCode)
@@ -392,12 +388,12 @@ final class OneDriveApi
 		http.addRequestHeader("Authorization", accessToken);
 	}
 
-	private JSONValue get(const(char)[] url, bool skipToken = false)
+	private JSONValue get(const(char)[] url)
 	{
 		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.get;
 		http.url = url;
-		if (!skipToken) addAccessTokenHeader(); // HACK: requestUploadStatus
+		addAccessTokenHeader();
 		auto response = perform();
 		checkHttpCode(response);
 		return response;
