@@ -3,6 +3,15 @@
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2020-10-27
+### Changed
+- Improved synchronization algorithm
+- Retry on failed fragment upload
+
+### Fixed
+- Regex for parsing authentication uri
+- Moving a folder from/to a shared folder in monitor mode
+
 ## [1.1.3] - 2018-09-09
 ### Fixed
 - Excessive usage of CPU in monitor mode
@@ -10,8 +19,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [1.1.2] - 2018-09-09
 ### Added
 - Test suite
+
 ### Changed
 - Disabled buffering on stdout
+
 ### Fixed
 - Crash when the delta link is expired
 - Crash when an item is deleted
@@ -25,6 +36,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Support for shared folders (OneDrive Personal only)
 - `--download` option to only download changes
 - `DC` variable in Makefile to chose the compiler
+
 ### Changed
 - Print logs on stdout instead of stderr
 - Improve log messages
@@ -32,12 +44,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [1.0.1] - 2017-08-01
 ### Added
 - `--syncdir` option
+
 ### Changed
 - `--version` output simplified
 - Updated README
+
 ### Fixed
 - Fix crash caused by remotely deleted and recreated directories
 
 ## [1.0.0] - 2017-07-14
 ### Added
 - `--version` option
+
+[1.0.0]: https://github.com/skilion/onedrive/tree/v1.0.0
+[1.0.1]: https://github.com/skilion/onedrive/compare/v1.0.0...v1.0.1
+[1.1.0]: https://github.com/skilion/onedrive/compare/v1.0.1...v1.1.0
+[1.1.1]: https://github.com/skilion/onedrive/compare/v1.1.0...v1.1.1
+[1.1.2]: https://github.com/skilion/onedrive/compare/v1.1.1...v1.1.2
+[1.1.3]: https://github.com/skilion/onedrive/compare/v1.1.2...v1.1.3
+[1.1.4]: https://github.com/skilion/onedrive/compare/v1.1.3...v1.1.4
