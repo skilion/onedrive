@@ -6,7 +6,7 @@
 * Real-Time file monitoring with Inotify
 * Resumable uploads
 * Support OneDrive for Business (part of Office 365)
-* Shared folders (not Business)
+* Shared folders (only OneDrive Personal)
 
 ### What's missing:
 * While local changes are uploaded right away, remote changes are delayed
@@ -25,13 +25,13 @@ sudo apt install libcurl4-openssl-dev
 sudo apt install libsqlite3-dev
 
 # Ubuntu 18+
-sudo snap install --classic dmd && sudo snap install --classic dub
+sudo snap install --classic dmd
 
 # Ubuntu 17 & Debian
 sudo wget https://netcologne.dl.sourceforge.net/project/d-apt/files/d-apt.list -O /etc/apt/sources.list.d/d-apt.list
 sudo apt-get update --allow-insecure-repositories
 sudo apt-get -y --allow-unauthenticated install --reinstall d-apt-keyring
-sudo apt-get update && sudo apt-get install dmd-compiler dub
+sudo apt-get update && sudo apt-get install dmd-compiler
 ```
 
 ### Prerequisites: Fedora/CentOS
@@ -60,7 +60,11 @@ make DC=ldmd2
 ```
 
 ### First run :zap:
-After installing the application you must run it once from an interactive terminal to authorize it.
+After installing the application you *must* run it once from an interactive terminal to authorize it.
+
+```sh
+onedrive
+```
 
 You will be asked to open a specific link using your web browser where you will have to login into your Microsoft Account and give the application the permission to access your files. After giving the permission, you will be redirected to a blank page. Copy the URI of the blank page into the application.
 
@@ -99,10 +103,10 @@ Documents/latest_report.docx
 Work/ProjectX
 notes.txt
 ```
-Note: after changing the sync list, you must perform a full synchronization by executing `onedrive --resync`
+Note: after changing the sync list, you *must* perform a full synchronization by executing `onedrive --resync`
 
 ### Shared folders
-Folders shared with you can be synced by adding them to your OneDrive. To do that open your Onedrive, go to the Shared files list, right click on the folder you want to sync and then click on "Add to my OneDrive".
+Folders shared with you can be synced by adding them to your OneDrive through the web interface. Go to the Shared files list, right click on the folder you want to sync and then click on "Add to my OneDrive".
 
 ### OneDrive service
 If you want to sync your files automatically, enable and start the systemd service:
@@ -154,12 +158,12 @@ no option        Sync and exit
 -m     --monitor Keep monitoring for local and remote changes
    --print-token Print the access token, useful for debugging
         --resync Forget the last saved state, perform a full sync
-       --syncdir Set the directory used to sync the files that are synced
+       --syncdir Set the directory used to sync the files
 -v     --verbose Print more details, useful for debugging
        --version Print the version and exit
 -h        --help This help information.
 ```
 
-### File naming
+### File name limitations
 The files and directories in the synchronization directory must follow the [Windows naming conventions](https://docs.microsoft.com/en-gb/windows/win32/fileio/naming-a-file).
 The application will crash for example if you have two files with the same name but different case. This is expected behavior and won't be fixed.
