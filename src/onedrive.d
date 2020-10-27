@@ -141,19 +141,6 @@ final class OneDriveApi
 		return get(url);
 	}
 
-	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delta
-	JSONValue viewChangesByPath(const(char)[] path, const(char)[] deltaLink)
-	{
-		checkAccessTokenExpired();
-		const(char)[] url = deltaLink;
-		if (url == null) {
-			if (path == ".") url = driveUrl ~ "/root/delta";
-			else url = itemByPathUrl ~ encodeComponent(path) ~ ":/delta";
-			url ~= "?select=id,name,eTag,cTag,deleted,file,folder,root,fileSystemInfo,remoteItem,parentReference";
-		}
-		return get(url);
-	}
-
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get_content
 	void downloadById(const(char)[] driveId, const(char)[] id, string saveToPath)
 	{
