@@ -1,6 +1,14 @@
-import std.net.curl: CurlException, HTTP;
-import std.datetime, std.exception, std.file, std.json, std.path;
-import std.stdio, std.string, std.uni, std.uri;
+import std.algorithm: min;
+import std.conv;
+import std.datetime;
+import std.exception;
+import std.file;
+import std.json;
+import std.path;
+import std.stdio;
+import std.string;
+import std.uri;
+import std.net.curl;
 import config;
 static import log;
 
@@ -159,7 +167,7 @@ final class OneDriveApi
 		checkAccessTokenExpired();
 		string url = driveByIdUrl ~ driveId ~ "/items/" ~ parentId ~ ":/" ~ encodeComponent(filename) ~ ":/content";
 		if (eTag) http.addRequestHeader("if-match", eTag);
-		return upload(localPath, url);
+		return upload(url, localPath);
 	}
 
 	unittest
@@ -189,7 +197,7 @@ final class OneDriveApi
 		checkAccessTokenExpired();
 		string url = driveByIdUrl ~ driveId ~ "/items/" ~ id ~ "/content";
 		if (eTag) http.addRequestHeader("If-Match", eTag);
-		return upload(localPath, url);
+		return upload(url, localPath);
 	}
 
 	unittest
@@ -311,25 +319,12 @@ final class OneDriveApi
 	}
 
 	// https://dev.onedrive.com/items/upload_large_files.htm
-	JSONValue uploadFragment(const(char)[] uploadUrl, string filepath, long offset, long offsetSize, long fileSize)
+	JSONValue uploadFragment(const(char)[] uploadUrl, string filepath, long offset, long fragmentSize, long fileSize)
 	{
 		checkAccessTokenExpired();
-		scope(exit) {
-			http.clearRequestHeaders();
-			http.onSend = null;
-		}
-		http.method = HTTP.Method.put;
-		http.url = uploadUrl;
-		import std.conv;
-		string contentRange = "bytes " ~ to!string(offset) ~ "-" ~ to!string(offset + offsetSize - 1) ~ "/" ~ to!string(fileSize);
+		string contentRange = "bytes " ~ to!string(offset) ~ "-" ~ to!string(offset + fragmentSize - 1) ~ "/" ~ to!string(fileSize);
 		http.addRequestHeader("Content-Range", contentRange);
-		auto file = File(filepath, "rb");
-		file.seek(offset);
-		http.onSend = data => file.rawRead(data).length;
-		http.contentLength = offsetSize;
-		auto response = perform();
-		checkHttpCode();
-		return response;
+		return upload(uploadUrl, filepath, offset, fragmentSize);
 	}
 
 	// https://dev.onedrive.com/items/upload_large_files.htm
@@ -390,118 +385,124 @@ final class OneDriveApi
 
 	private JSONValue get(const(char)[] url)
 	{
-		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.get;
 		http.url = url;
-		addAccessTokenHeader();
-		auto response = perform();
-		checkHttpCode(response);
-		return response;
+		return perform();
 	}
 
 	private void del(const(char)[] url)
 	{
-		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.del;
 		http.url = url;
-		addAccessTokenHeader();
-		auto response = perform();
-		checkHttpCode(response);
+		perform();
 	}
 
-	private void download(const(char)[] url, string filename)
+	private void download(const(char)[] url, string outfile)
 	{
-		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.get;
 		http.url = url;
-		addAccessTokenHeader();
-		auto f = File(filename, "wb");
-		http.onReceive = (ubyte[] data) {
-			f.rawWrite(data);
-			return data.length;
-		};
-		http.perform();
-		checkHttpCode();
+		perform(outfile);
 	}
 
-	private auto patch(T)(const(char)[] url, const(T)[] patchData)
+	private auto patch(const(char)[] url, const(void)[] patchData)
 	{
-		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.patch;
 		http.url = url;
-		addAccessTokenHeader();
-		auto response = perform(patchData);
-		checkHttpCode(response);
-		return response;
+		setContent(patchData);
+		return perform();
 	}
 
-	private auto post(T)(const(char)[] url, const(T)[] postData)
+	private auto post(const(char)[] url, const(void)[] postData)
 	{
-		scope(exit) http.clearRequestHeaders();
 		http.method = HTTP.Method.post;
 		http.url = url;
-		addAccessTokenHeader();
-		auto response = perform(postData);
-		checkHttpCode(response);
-		return response;
+		setContent(postData);
+		return perform();
 	}
 
-	private JSONValue upload(string filepath, string url)
+	private JSONValue upload(const(char)[] url, string filepath, long offset = 0, long contentLength = 0)
 	{
-		scope(exit) {
-			http.clearRequestHeaders();
-			http.onSend = null;
-			http.contentLength = 0;
-		}
 		http.method = HTTP.Method.put;
 		http.url = url;
-		addAccessTokenHeader();
 		http.addRequestHeader("Content-Type", "application/octet-stream");
 		auto file = File(filepath, "rb");
+		file.seek(offset);
 		http.onSend = data => file.rawRead(data).length;
-		http.contentLength = file.size;
-		auto response = perform();
-		checkHttpCode(response);
-		return response;
+		http.contentLength = contentLength <= 0 ? file.size : contentLength;
+		return perform();
 	}
 
-	private JSONValue perform(const(void)[] sendData)
+	private void setContent(const(void)[] data)
 	{
-		scope(exit) {
-			http.onSend = null;
-			http.contentLength = 0;
-		}
-		if (sendData) {
-			http.contentLength = sendData.length;
-			http.onSend = (void[] buf) {
-				import std.algorithm: min;
-				size_t minLen = min(buf.length, sendData.length);
-				if (minLen == 0) return 0;
-				buf[0 .. minLen] = sendData[0 .. minLen];
-				sendData = sendData[minLen .. $];
-				return minLen;
-			};
-		} else {
-			http.onSend = buf => 0;
-		}
-		return perform();
+		http.contentLength = data.length;
+		http.onSend = (void[] buf) {
+			auto length = min(buf.length, data.length);
+			buf[0 .. length] = data[0 .. length];
+			data = data[length .. $];
+			return length;
+		};
 	}
 
 	private JSONValue perform()
 	{
-		scope(exit) http.onReceive = null;
+		scope(exit) {
+			http.contentLength = 0;
+			http.onReceive = null;
+			http.onSend = null;
+			http.clearRequestHeaders();
+		}
+		scope(failure) {
+			http = HTTP();
+		}
+
+		addAccessTokenHeader();
+
 		char[] content;
 		http.onReceive = (ubyte[] data) {
 			content ~= data;
 			return data.length;
 		};
+
 		http.perform();
+
+		auto json = parseJson(content);
+		checkHttpCode(json);
+
+		return json;
+	}
+
+	private void perform(string outfile)
+	{
+		scope(exit) {
+			http.contentLength = 0;
+			http.onReceive = null;
+			http.onSend = null;
+			http.clearRequestHeaders();
+		}
+		scope(failure) {
+			http = HTTP();
+		}
+
+		addAccessTokenHeader();
+
+		auto f = File(outfile, "wb");
+		http.onReceive = (ubyte[] data) {
+			f.rawWrite(data);
+			return data.length;
+		};
+
+		http.perform();
+		checkHttpCode();
+	}
+
+	private JSONValue parseJson(const(char)[] str)
+	{
 		JSONValue json;
 		try {
-			json = content.parseJSON();
+			json = parseJSON(str);
 		} catch (JSONException e) {
 			e.msg ~= "\n";
-			e.msg ~= content;
+			e.msg ~= str;
 			throw e;
 		}
 		return json;
