@@ -137,6 +137,14 @@ final class OneDriveApi
 		assert("folder" in root);
 	}
 
+	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_get
+	JSONValue getItemByPath(const(char)[] path)
+	{
+		checkAccessTokenExpired();
+		const(char)[] url = itemByPathUrl ~ encodeComponent(path);
+		return get(url);
+	}
+
 	// https://docs.microsoft.com/en-us/onedrive/developer/rest-api/api/driveitem_delta
 	JSONValue viewChangesById(const(char)[] driveId, const(char)[] id, const(char)[] deltaLink)
 	{
