@@ -128,7 +128,6 @@ int main(string[] args)
 			if (!online) return;
 			try {
 				sync.scanForDifferences(path);
-				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
@@ -138,7 +137,6 @@ int main(string[] args)
 			if (!online) return;
 			try {
 				sync.scanForDifferences(path);
-				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
@@ -148,7 +146,6 @@ int main(string[] args)
 			if (!online) return;
 			try {
 				sync.deleteByPath(path);
-				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
@@ -158,7 +155,6 @@ int main(string[] args)
 			log.vlog("[M] Item moved: ", from, " -> ", to);
 			try {
 				sync.uploadMoveItem(from, to);
-				sync.applyDifferences();
 			} catch(Exception e) {
 				log.log(e.msg);
 			}
