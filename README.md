@@ -21,8 +21,7 @@
 
 ### Prerequisites: Ubuntu/Debian
 ```sh
-sudo apt install libcurl4-openssl-dev
-sudo apt install libsqlite3-dev
+sudo apt install git libcurl4-openssl-dev libsqlite3-dev
 
 # Ubuntu 18+
 sudo snap install --classic dmd
@@ -36,14 +35,13 @@ sudo apt-get update && sudo apt-get install dmd-compiler
 
 ### Prerequisites: Fedora/CentOS
 ```sh
-sudo yum install libcurl-devel
-sudo yum install sqlite-devel
+sudo yum install git libcurl-devel sqlite-devel
 curl -fsS https://dlang.org/install.sh | bash -s dmd
 ```
 
 ### Prerequisites: Arch Linux
 ```sh
-sudo pacman -S curl sqlite dlang
+sudo pacman -S git dlang-dmd
 ```
 
 ### Installation
